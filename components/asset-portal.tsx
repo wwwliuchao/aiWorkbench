@@ -517,7 +517,10 @@ function EnhancedStatsReport({
   onResetDateRange,
   loading,
   error,
-  assetTypeMap
+  assetTypeMap,
+  assetTypes,
+  statsType,
+  onStatsTypeChange
 }: {
   assets: Asset[];
   stats: AssetStats;
@@ -529,18 +532,25 @@ function EnhancedStatsReport({
   loading: boolean;
   error: string | null;
   assetTypeMap: Map<string, AssetTypeDefinition>;
+  assetTypes: AssetTypeDefinition[];
+  statsType: string | null;
+  onStatsTypeChange: (type: string | null) => void;
 }) {
   const hasDateRange = Boolean(startDate || endDate);
+  const filteredAssets = useMemo(
+    () => (statsType ? assets.filter((asset) => asset.type === statsType) : assets),
+    [assets, statsType]
+  );
   const sortedAssets = useMemo(
     () => {
       const rangeClickMap = new Map(stats.assetVisitStats.map((item) => [item.assetId, item.clickCount]));
-      return [...assets].sort((left, right) => {
+      return [...filteredAssets].sort((left, right) => {
         const leftCount = hasDateRange ? rangeClickMap.get(left.id) ?? 0 : left.clickCount;
         const rightCount = hasDateRange ? rangeClickMap.get(right.id) ?? 0 : right.clickCount;
         return rightCount - leftCount || left.id - right.id;
       });
     },
-    [assets, hasDateRange, stats.assetVisitStats]
+    [filteredAssets, hasDateRange, stats.assetVisitStats]
   );
   const rangeClickMap = useMemo(
     () => new Map(stats.assetVisitStats.map((item) => [item.assetId, item.clickCount])),
@@ -586,6 +596,21 @@ function EnhancedStatsReport({
         <button type="button" onClick={onResetDateRange} disabled={!hasDateRange}>
           重置
         </button>
+        <div className="statsFilterDivider" />
+        <label>
+          <span>应用类型</span>
+          <select
+            value={statsType ?? ""}
+            onChange={(event) => onStatsTypeChange(event.target.value || null)}
+          >
+            <option value="">全部类型</option>
+            {assetTypes.map((assetType) => (
+              <option key={assetType.code} value={assetType.code}>
+                {assetType.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="statsSummary expanded">
@@ -1418,8 +1443,12 @@ export default function AssetPortal() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [keyword, setKeyword] = useState("");
-  const [statsStartDate, setStatsStartDate] = useState("");
+  const [statsStartDate, setStatsStartDate] = useState(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  });
   const [statsEndDate, setStatsEndDate] = useState("");
+  const [statsType, setStatsType] = useState<string | null>(null);
 
   useEffect(() => {
     fetchJson<SessionUser | null>("/api/auth/me")
@@ -1484,13 +1513,18 @@ export default function AssetPortal() {
       return;
     }
 
+    const params = new URLSearchParams();
+    if (statsType) {
+      params.set("type", statsType);
+    }
+
     setReportAssets((current) => ({ ...current, loading: true, error: null }));
-    fetchJson<Asset[]>("/api/assets")
+    fetchJson<Asset[]>(`/api/assets${params.toString() ? `?${params.toString()}` : ""}`)
       .then((data) => setReportAssets({ data, loading: false, error: null }))
       .catch((error: Error) =>
         setReportAssets({ data: [], loading: false, error: error.message })
       );
-  }, [activeView]);
+  }, [activeView, statsType]);
 
   const directoryTree = useMemo(() => buildDirectoryTree(directories.data), [directories.data]);
   const selectedDirectory = useMemo(
@@ -1596,14 +1630,16 @@ export default function AssetPortal() {
           <span>▥</span>
           <strong>统计报表</strong>
         </button>
-        <button
-          className={activeView === "admin" ? "homeNav active" : "homeNav"}
-          type="button"
-          onClick={openAdmin}
-        >
-          <span>⚙</span>
-          <strong>管理后台</strong>
-        </button>
+        {currentUser?.isAdmin ? (
+          <button
+            className={activeView === "admin" ? "homeNav active" : "homeNav"}
+            type="button"
+            onClick={openAdmin}
+          >
+            <span>⚙</span>
+            <strong>管理后台</strong>
+          </button>
+        ) : null}
 
         <nav className="directoryNav" aria-label="资产目录">
           {directories.loading ? <p className="navState">目录加载中...</p> : null}
@@ -1650,7 +1686,7 @@ export default function AssetPortal() {
           ) : null}
         </div>
 
-        {activeView === "admin" ? (
+        {activeView === "admin" && currentUser?.isAdmin ? (
           <AdminPanel onDataChanged={refreshPortalData} />
         ) : activeView === "stats" ? (
           <EnhancedStatsReport
@@ -1664,6 +1700,9 @@ export default function AssetPortal() {
             loading={reportAssets.loading || stats.loading}
             error={reportAssets.error ?? stats.error}
             assetTypeMap={assetTypeMap}
+            assetTypes={assetTypes.data}
+            statsType={statsType}
+            onStatsTypeChange={setStatsType}
           />
         ) : selectedDirectoryId === null ? (
           <>

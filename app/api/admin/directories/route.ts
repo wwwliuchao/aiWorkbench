@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
-import { createAdminDirectory, listAdminDirectories } from "@/lib/admin";
+import { createAdminDirectory, listAdminDirectories, requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
-function requireUser() {
-  return getCurrentUser() ? null : NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-}
-
 export async function GET() {
-  const unauthorized = requireUser();
+  const unauthorized = requireAdmin();
   if (unauthorized) {
     return unauthorized;
   }
@@ -24,7 +19,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = requireUser();
+  const unauthorized = requireAdmin();
   if (unauthorized) {
     return unauthorized;
   }

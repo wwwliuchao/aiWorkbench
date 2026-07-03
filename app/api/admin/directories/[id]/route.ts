@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
-import { updateAdminDirectory } from "@/lib/admin";
+import { requireAdmin, updateAdminDirectory } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -10,12 +9,8 @@ type RouteContext = {
   };
 };
 
-function requireUser() {
-  return getCurrentUser() ? null : NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-}
-
 export async function PUT(request: Request, context: RouteContext) {
-  const unauthorized = requireUser();
+  const unauthorized = requireAdmin();
   if (unauthorized) {
     return unauthorized;
   }

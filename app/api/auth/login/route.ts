@@ -27,7 +27,8 @@ export async function POST(request: Request) {
         name: getDisplayName(user),
         email: user.email,
         departmentName: user.departmentName,
-        provider: "password"
+        provider: "password",
+        isAdmin: user.isManager === 1
       }
     }
   });
@@ -39,7 +40,8 @@ export async function POST(request: Request) {
       name: getDisplayName(user),
       email: user.email,
       departmentName: user.departmentName,
-      provider: "password"
+      provider: "password",
+      isAdmin: user.isManager === 1
     },
     request
   );

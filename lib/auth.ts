@@ -9,6 +9,7 @@ export type SessionUser = {
   email: string | null;
   departmentName: string | null;
   provider: "password" | "feishu";
+  isAdmin: boolean;
 };
 
 function encodeSession(user: SessionUser) {

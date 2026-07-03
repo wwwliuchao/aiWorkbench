@@ -117,7 +117,8 @@ export async function GET(request: NextRequest) {
       name: getDisplayName(user),
       email: user.email,
       departmentName: user.departmentName,
-      provider: "feishu"
+      provider: "feishu",
+      isAdmin: user.isManager === 1
     },
     request
   );

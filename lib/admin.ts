@@ -1,7 +1,24 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getPool } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+import { NextResponse } from "next/server";
 
 export type AdminStatus = "active" | "inactive";
+
+/**
+ * 检查当前用户是否为管理员。
+ * 如果不是管理员返回 401 响应，否则返回 null 表示通过。
+ */
+export function requireAdmin(): NextResponse | null {
+  const user = getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
+  if (!user.isAdmin) {
+    return NextResponse.json({ error: "需要管理员权限" }, { status: 403 });
+  }
+  return null;
+}
 
 export type AdminDirectory = {
   id: number;
