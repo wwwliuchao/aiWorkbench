@@ -397,11 +397,13 @@ export async function getAssetStats(): Promise<AssetStats> {
 export async function getAssetStatsByDateRange(options: {
   startDate?: string | null;
   endDate?: string | null;
+  type?: string | null;
 } = {}): Promise<AssetStats> {
   const baseStats = await getAssetStats();
   const hasVisitLogs = await assetVisitLogsExist();
   const startDate = normalizeDate(options.startDate);
   const endDate = normalizeDate(options.endDate);
+  const type = options.type?.trim() || null;
 
   if (!hasVisitLogs) {
     return {
@@ -420,19 +422,27 @@ export async function getAssetStatsByDateRange(options: {
   const params: Record<string, string> = {};
 
   if (startDate) {
-    filters.push("visited_at >= :startDate");
+    filters.push("vl.visited_at >= :startDate");
     params.startDate = startDate;
   }
   if (endDate) {
-    filters.push("visited_at < DATE_ADD(:endDate, INTERVAL 1 DAY)");
+    filters.push("vl.visited_at < DATE_ADD(:endDate, INTERVAL 1 DAY)");
     params.endDate = endDate;
+  }
+
+  // When filtering by asset type, JOIN with assets and filter
+  const visitLogFrom = type
+    ? "asset_visit_logs vl INNER JOIN assets a ON a.id = vl.asset_id AND a.status = 'active' AND a.type = :type"
+    : "asset_visit_logs vl";
+  if (type) {
+    params.type = type;
   }
 
   const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
   const defaultWindowWhere =
-    filters.length > 0 ? where : "WHERE visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+    filters.length > 0 ? where : `WHERE vl.visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`;
   const defaultDailyWhere =
-    filters.length > 0 ? where : "WHERE visited_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 13 DAY)";
+    filters.length > 0 ? where : `WHERE vl.visited_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 13 DAY)`;
 
   const [
     periodStatsResult,
@@ -444,45 +454,45 @@ export async function getAssetStatsByDateRange(options: {
     getPool().execute<RowDataPacket[]>(
       `SELECT
          COUNT(*) AS range_click_count,
-         SUM(CASE WHEN visited_at >= CURRENT_DATE() THEN 1 ELSE 0 END) AS today_click_count,
-         SUM(CASE WHEN visited_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS seven_day_click_count,
-         SUM(CASE WHEN visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS thirty_day_click_count
-       FROM asset_visit_logs
+         SUM(CASE WHEN vl.visited_at >= CURRENT_DATE() THEN 1 ELSE 0 END) AS today_click_count,
+         SUM(CASE WHEN vl.visited_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS seven_day_click_count,
+         SUM(CASE WHEN vl.visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS thirty_day_click_count
+       FROM ${visitLogFrom}
        ${where}`,
       params
     ),
     getPool().execute<AssetVisitStatRow[]>(
-      `SELECT asset_id, COUNT(*) AS click_count
-       FROM asset_visit_logs
+      `SELECT vl.asset_id, COUNT(*) AS click_count
+       FROM ${visitLogFrom}
        ${defaultWindowWhere}
-       GROUP BY asset_id
-       ORDER BY click_count DESC, asset_id ASC`,
+       GROUP BY vl.asset_id
+       ORDER BY click_count DESC, vl.asset_id ASC`,
       params
     ),
     getPool().execute<DimensionStatRow[]>(
-      `SELECT COALESCE(NULLIF(department_name, ''), '未填写') AS name, COUNT(*) AS click_count
-       FROM asset_visit_logs
+      `SELECT COALESCE(NULLIF(vl.department_name, ''), '未填写') AS name, COUNT(*) AS click_count
+       FROM ${visitLogFrom}
        ${defaultWindowWhere}
-       GROUP BY COALESCE(NULLIF(department_name, ''), '未填写')
+       GROUP BY COALESCE(NULLIF(vl.department_name, ''), '未填写')
        ORDER BY click_count DESC, name ASC
        LIMIT 10`,
       params
     ),
     getPool().execute<DimensionStatRow[]>(
-      `SELECT COALESCE(NULLIF(user_name, ''), NULLIF(user_email, ''), '匿名访问') AS name,
+      `SELECT COALESCE(NULLIF(vl.user_name, ''), NULLIF(vl.user_email, ''), '匿名访问') AS name,
          COUNT(*) AS click_count
-       FROM asset_visit_logs
+       FROM ${visitLogFrom}
        ${defaultWindowWhere}
-       GROUP BY COALESCE(NULLIF(user_name, ''), NULLIF(user_email, ''), '匿名访问')
+       GROUP BY COALESCE(NULLIF(vl.user_name, ''), NULLIF(vl.user_email, ''), '匿名访问')
        ORDER BY click_count DESC, name ASC
        LIMIT 10`,
       params
     ),
     getPool().execute<DailyStatRow[]>(
-      `SELECT DATE_FORMAT(visited_at, '%Y-%m-%d') AS date, COUNT(*) AS click_count
-       FROM asset_visit_logs
+      `SELECT DATE_FORMAT(vl.visited_at, '%Y-%m-%d') AS date, COUNT(*) AS click_count
+       FROM ${visitLogFrom}
        ${defaultDailyWhere}
-       GROUP BY DATE_FORMAT(visited_at, '%Y-%m-%d')
+       GROUP BY DATE_FORMAT(vl.visited_at, '%Y-%m-%d')
        ORDER BY date ASC`,
       params
     )

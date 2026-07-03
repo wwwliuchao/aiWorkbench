@@ -537,20 +537,16 @@ function EnhancedStatsReport({
   onStatsTypeChange: (type: string | null) => void;
 }) {
   const hasDateRange = Boolean(startDate || endDate);
-  const filteredAssets = useMemo(
-    () => (statsType ? assets.filter((asset) => asset.type === statsType) : assets),
-    [assets, statsType]
-  );
   const sortedAssets = useMemo(
     () => {
       const rangeClickMap = new Map(stats.assetVisitStats.map((item) => [item.assetId, item.clickCount]));
-      return [...filteredAssets].sort((left, right) => {
+      return [...assets].sort((left, right) => {
         const leftCount = hasDateRange ? rangeClickMap.get(left.id) ?? 0 : left.clickCount;
         const rightCount = hasDateRange ? rangeClickMap.get(right.id) ?? 0 : right.clickCount;
         return rightCount - leftCount || left.id - right.id;
       });
     },
-    [filteredAssets, hasDateRange, stats.assetVisitStats]
+    [assets, hasDateRange, stats.assetVisitStats]
   );
   const rangeClickMap = useMemo(
     () => new Map(stats.assetVisitStats.map((item) => [item.assetId, item.clickCount])),
@@ -1468,7 +1464,9 @@ export default function AssetPortal() {
       .catch((error: Error) =>
         setAssetTypes({ data: [], loading: false, error: error.message })
       );
+  }, []);
 
+  useEffect(() => {
     const statsParams = new URLSearchParams();
     if (statsStartDate) {
       statsParams.set("startDate", statsStartDate);
@@ -1476,15 +1474,17 @@ export default function AssetPortal() {
     if (statsEndDate) {
       statsParams.set("endDate", statsEndDate);
     }
-    const statsUrl = statsParams.toString() ? `/api/stats?${statsParams.toString()}` : "/api/stats";
+    if (statsType) {
+      statsParams.set("type", statsType);
+    }
+    const statsUrl = `/api/stats?${statsParams.toString()}`;
 
-    setStats((current) => ({ ...current, loading: true, error: null }));
     fetchJson<AssetStats>(statsUrl)
       .then((data) => setStats({ data, loading: false, error: null }))
       .catch((error: Error) =>
         setStats({ data: defaultStats, loading: false, error: error.message })
       );
-  }, [statsStartDate, statsEndDate]);
+  }, [statsStartDate, statsEndDate, statsType]);
 
   useEffect(() => {
     if (activeView === "stats" || activeView === "admin") {
@@ -1518,11 +1518,10 @@ export default function AssetPortal() {
       params.set("type", statsType);
     }
 
-    setReportAssets((current) => ({ ...current, loading: true, error: null }));
     fetchJson<Asset[]>(`/api/assets${params.toString() ? `?${params.toString()}` : ""}`)
-      .then((data) => setReportAssets({ data, loading: false, error: null }))
+      .then((data) => setReportAssets((current) => ({ ...current, data, loading: false, error: null })))
       .catch((error: Error) =>
-        setReportAssets({ data: [], loading: false, error: error.message })
+        setReportAssets((current) => ({ ...current, loading: false, error: error.message }))
       );
   }, [activeView, statsType]);
 
