@@ -870,7 +870,9 @@ input {
 }
 
 .assetTable,
-.statsTable {
+.statsTable,
+.rpaTable,
+.rpaRecordTable {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -884,7 +886,11 @@ input {
 .assetTableHead,
 .assetTableRow,
 .statsTableHead,
-.statsTableRow {
+.statsTableRow,
+.rpaTableHead,
+.rpaTableRow,
+.rpaRecordTableHead,
+.rpaRecordTableRow {
   display: grid;
   align-items: center;
 }
@@ -903,8 +909,24 @@ input {
   padding: 13px 16px;
 }
 
+.rpaTableHead,
+.rpaTableRow {
+  grid-template-columns: minmax(240px, 1.55fr) 136px 120px 104px 150px 104px 88px;
+  gap: 16px;
+  padding: 13px 16px;
+}
+
+.rpaRecordTableHead,
+.rpaRecordTableRow {
+  grid-template-columns: minmax(220px, 1.45fr) 132px 104px 150px 150px 92px minmax(180px, 1fr);
+  gap: 14px;
+  padding: 13px 16px;
+}
+
 .assetTableHead,
-.statsTableHead {
+.statsTableHead,
+.rpaTableHead,
+.rpaRecordTableHead {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -917,18 +939,24 @@ input {
 }
 
 .assetTableRow,
-.statsTableRow {
+.statsTableRow,
+.rpaTableRow,
+.rpaRecordTableRow {
   min-height: 64px;
   border-top: 1px solid var(--line);
 }
 
 .assetTableRow:first-of-type,
-.statsTableRow:first-of-type {
+.statsTableRow:first-of-type,
+.rpaTableRow:first-of-type,
+.rpaRecordTableRow:first-of-type {
   border-top: 0;
 }
 
 .assetTableRow:hover,
-.statsTableRow:hover {
+.statsTableRow:hover,
+.rpaTableRow:hover,
+.rpaRecordTableRow:hover {
   background: var(--surface-hover);
 }
 
@@ -954,10 +982,55 @@ input {
 }
 
 .assetTableRow p,
-.statsTableRow p {
+.statsTableRow p,
+.rpaTableRow p,
+.rpaRecordTableRow p {
   margin-bottom: 0;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.rpaTableRow strong,
+.rpaRecordTableRow strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-strong);
+  font-weight: 780;
+}
+
+.rpaActionButton {
+  min-height: 34px;
+  border: 1px solid rgba(31, 157, 122, 0.28);
+  border-radius: var(--radius-md);
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  cursor: pointer;
+  font-weight: 760;
+  padding: 0 12px;
+}
+
+.rpaActionButton:hover {
+  border-color: rgba(31, 157, 122, 0.42);
+  background: rgba(31, 157, 122, 0.14);
+  transform: translateY(-1px);
+}
+
+.rpaActionButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  transform: none;
+}
+
+.rpaActionButton.secondary {
+  border-color: var(--line);
+  background: #fff;
+  color: var(--text-strong);
+}
+
+.rpaActionButton.secondary:hover {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: var(--blue-soft);
+  color: var(--blue);
 }
 
 .clickCount {
@@ -1617,6 +1690,10 @@ input {
   color: var(--text-strong);
 }
 
+.adminLinkButton {
+  text-decoration: none;
+}
+
 .buttonRow {
   display: flex;
   flex-wrap: wrap;
@@ -1838,14 +1915,20 @@ input {
   }
 
   .assetTable,
-  .statsTable {
+  .statsTable,
+  .rpaTable,
+  .rpaRecordTable {
     overflow-x: auto;
   }
 
   .assetTableHead,
   .assetTableRow,
   .statsTableHead,
-  .statsTableRow {
+  .statsTableRow,
+  .rpaTableHead,
+  .rpaTableRow,
+  .rpaRecordTableHead,
+  .rpaRecordTableRow {
     min-width: 820px;
   }
 }

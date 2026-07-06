@@ -15,7 +15,32 @@ type DirectoryNode = Directory & {
   children: DirectoryNode[];
 };
 
-type ActiveView = "home" | "directory" | "stats" | "admin";
+type ActiveView = "home" | "directory" | "stats" | "admin" | "rpa" | "rpaLogs";
+
+type RpaTask = {
+  id: string;
+  taskUuid: string | null;
+  deptName: string;
+  name: string;
+  description: string | null;
+  ownerName: string | null;
+  requirementDocUrl: string | null;
+  status: string | null;
+  updatedAt: string | null;
+};
+
+type RpaRunRecord = {
+  id: string;
+  taskUuid: string | null;
+  taskName: string | null;
+  status: string | null;
+  statusDesc: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  duration: string | null;
+  operatorName: string | null;
+  message: string | null;
+};
 
 type AdminStatus = "active" | "inactive";
 
@@ -60,6 +85,24 @@ type AssetFormState = {
   tags: string;
   sortOrder: string;
   status: AdminStatus;
+};
+
+type AdminRpaTask = {
+  id: string;
+  taskUuid: string | null;
+  deptName: string;
+  name: string;
+  ownerName: string | null;
+  status: string | null;
+  requirementDocUrl: string | null;
+  updatedAt: string | null;
+};
+
+type RpaTaskFormState = {
+  name: string;
+  deptName: string;
+  taskUuid: string;
+  requirementDocUrl: string;
 };
 
 const defaultStats: AssetStats = {
@@ -353,6 +396,264 @@ function AssetListPanel({
         ))}
       </div>
     </div>
+  );
+}
+
+function RpaTaskPanel({
+  tasks,
+  departments,
+  selectedDept,
+  loading,
+  error,
+  onSelectDept,
+  onViewLogs
+}: {
+  tasks: RpaTask[];
+  departments: string[];
+  selectedDept: string | null;
+  loading: boolean;
+  error: string | null;
+  onSelectDept: (deptName: string | null) => void;
+  onViewLogs: (task: RpaTask) => void;
+}) {
+  const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  async function startTask(task: RpaTask) {
+    setStartingTaskId(task.id);
+    setMessage(null);
+    setStartError(null);
+
+    try {
+      const response = await fetch(withBasePath(`/api/rpa/tasks/${encodeURIComponent(task.id)}/start`), {
+        method: "POST",
+        credentials: "include"
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "启动请求失败");
+      }
+
+      setMessage(`${task.name}：${payload.data?.message ?? "启动请求已发送"}`);
+    } catch (error) {
+      setStartError(error instanceof Error ? error.message : "启动请求失败");
+    } finally {
+      setStartingTaskId(null);
+    }
+  }
+
+  return (
+    <section className="directoryDetail">
+      <div className="detailHeader">
+        <div>
+          <h1>{selectedDept ? `实在RPA / ${selectedDept}` : "实在RPA"}</h1>
+          <span>按 rpa_task.dept_name 分组展示 RPA 任务，点击启动程序会调用后端启动接口。</span>
+        </div>
+      </div>
+
+      <section className="quickGrid" aria-label="RPA 部门筛选">
+        <button
+          className={selectedDept === null ? "quickAction active" : "quickAction"}
+          type="button"
+          onClick={() => onSelectDept(null)}
+        >
+          <span>⌂</span>
+          全部任务
+        </button>
+        {departments.map((deptName) => (
+          <button
+            className={selectedDept === deptName ? "quickAction active" : "quickAction"}
+            key={deptName}
+            type="button"
+            onClick={() => onSelectDept(deptName)}
+          >
+            <span>▣</span>
+            {deptName}
+          </button>
+        ))}
+      </section>
+
+      <div className="assetTablePanel">
+        <div className="panelTitleRow">
+          <div>
+            <h2>RPA 任务</h2>
+            <p>当前共 {tasks.length} 个任务。</p>
+          </div>
+        </div>
+
+        {message ? <div className="adminNotice success">{message}</div> : null}
+        {startError ? <div className="adminNotice error">{startError}</div> : null}
+
+        {error ? (
+          <div className="emptyState">
+            <h3>无法读取 RPA 任务</h3>
+            <p>{error}</p>
+          </div>
+        ) : null}
+
+        {loading && tasks.length === 0 ? (
+          <div className="skeletonList" aria-label="RPA 任务加载中">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div className="skeletonRow" key={index}>
+                <span />
+                <span />
+                <span />
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {!loading && !error && tasks.length === 0 ? (
+          <div className="emptyState">
+            <h3>暂无 RPA 任务</h3>
+            <p>请确认 rpa_task 表已有数据，并且包含 dept_name 字段。</p>
+          </div>
+        ) : null}
+
+        <div className="rpaTable">
+          <div className="rpaTableHead">
+            <span>任务名称</span>
+            <span>部门</span>
+            <span>负责人</span>
+            <span>需求文档</span>
+            <span>状态</span>
+            <span>更新时间</span>
+            <span>操作</span>
+            <span>日志</span>
+          </div>
+          {tasks.map((task) => (
+            <div className="rpaTableRow" key={task.id}>
+              <div>
+                <strong>{task.name}</strong>
+                <p>{task.description || "暂无说明"}</p>
+              </div>
+              <span>{task.deptName}</span>
+              <span>{task.ownerName || "未填写"}</span>
+              <span>
+                {task.requirementDocUrl ? (
+                  <a className="assetNameLink inlineLink" href={task.requirementDocUrl} target="_blank" rel="noreferrer">
+                    查看文档
+                  </a>
+                ) : (
+                  "未填写"
+                )}
+              </span>
+              <span>{task.status || "未填写"}</span>
+              <span>{task.updatedAt ? task.updatedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
+              <button
+                className="rpaActionButton"
+                type="button"
+                disabled={startingTaskId === task.id}
+                onClick={() => startTask(task)}
+              >
+                {startingTaskId === task.id ? "启动中..." : "启动程序"}
+              </button>
+              <button
+                className="rpaActionButton secondary"
+                type="button"
+                disabled={!task.taskUuid}
+                onClick={() => onViewLogs(task)}
+              >
+                日志
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RpaLogPanel({
+  task,
+  records,
+  loading,
+  error,
+  onBack
+}: {
+  task: RpaTask;
+  records: RpaRunRecord[];
+  loading: boolean;
+  error: string | null;
+  onBack: () => void;
+}) {
+  return (
+    <section className="directoryDetail">
+      <div className="detailHeader">
+        <div>
+          <h1>{task.name} / 运行日志</h1>
+          <span>
+            {task.deptName} · {task.taskUuid ?? "未配置 task_uuid"}
+          </span>
+        </div>
+        <button className="secondaryButton" type="button" onClick={onBack}>
+          返回任务列表
+        </button>
+      </div>
+
+      <div className="assetTablePanel">
+        <div className="panelTitleRow">
+          <div>
+            <h2>运行记录</h2>
+            <p>只展示当前 RPA 程序的 rpa_run_record 记录。</p>
+          </div>
+        </div>
+
+        {error ? (
+          <div className="emptyState">
+            <h3>无法读取运行记录</h3>
+            <p>{error}</p>
+          </div>
+        ) : null}
+
+        {loading && records.length === 0 ? (
+          <div className="skeletonList" aria-label="RPA 运行记录加载中">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div className="skeletonRow" key={index}>
+                <span />
+                <span />
+                <span />
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {!loading && !error && records.length === 0 ? (
+          <div className="emptyState">
+            <h3>暂无运行记录</h3>
+            <p>该程序还没有匹配到 task_uuid 对应的运行记录。</p>
+          </div>
+        ) : null}
+
+        <div className="rpaRecordTable">
+          <div className="rpaRecordTableHead">
+            <span>任务名称</span>
+            <span>部门</span>
+            <span>状态</span>
+            <span>开始时间</span>
+            <span>结束时间</span>
+            <span>耗时</span>
+            <span>执行信息</span>
+          </div>
+          {records.map((record) => (
+            <div className="rpaRecordTableRow" key={record.id}>
+              <div>
+                <strong>{record.taskName ?? task.name}</strong>
+                <p>{record.operatorName ? `操作人：${record.operatorName}` : "未记录操作人"}</p>
+              </div>
+              <span>{task.deptName}</span>
+              <span>{record.statusDesc || record.status || "未填写"}</span>
+              <span>{record.startedAt ? record.startedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
+              <span>{record.endedAt ? record.endedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
+              <span>{record.duration || "未填写"}</span>
+              <span>{record.message || "无"}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -760,11 +1061,19 @@ const emptyAssetForm: AssetFormState = {
   status: "active"
 };
 
+const emptyRpaTaskForm: RpaTaskFormState = {
+  name: "",
+  deptName: "",
+  taskUuid: "",
+  requirementDocUrl: ""
+};
+
 function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
-  const [activeTab, setActiveTab] = useState<"directories" | "assets" | "types">("assets");
+  const [activeTab, setActiveTab] = useState<"directories" | "assets" | "types" | "rpaTasks">("assets");
   const [directories, setDirectories] = useState<AdminDirectory[]>([]);
   const [assetTypes, setAssetTypes] = useState<AdminAssetType[]>([]);
   const [assets, setAssets] = useState<AdminAsset[]>([]);
+  const [rpaTasks, setRpaTasks] = useState<AdminRpaTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -772,23 +1081,27 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
   const [editingDirectoryId, setEditingDirectoryId] = useState<number | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<number | null>(null);
   const [editingAssetTypeCode, setEditingAssetTypeCode] = useState<string | null>(null);
+  const [editingRpaTaskId, setEditingRpaTaskId] = useState<string | null>(null);
   const [directoryForm, setDirectoryForm] = useState<DirectoryFormState>(emptyDirectoryForm);
   const [assetTypeForm, setAssetTypeForm] = useState<AssetTypeFormState>(emptyAssetTypeForm);
   const [assetForm, setAssetForm] = useState<AssetFormState>(emptyAssetForm);
+  const [rpaTaskForm, setRpaTaskForm] = useState<RpaTaskFormState>(emptyRpaTaskForm);
 
   async function loadAdminData() {
     setLoading(true);
     setError(null);
 
     try {
-      const [nextDirectories, nextTypes, nextAssets] = await Promise.all([
+      const [nextDirectories, nextTypes, nextAssets, nextRpaTasks] = await Promise.all([
         fetchJson<AdminDirectory[]>("/api/admin/directories"),
         fetchJson<AdminAssetType[]>("/api/admin/asset-types"),
-        fetchJson<AdminAsset[]>("/api/admin/assets")
+        fetchJson<AdminAsset[]>("/api/admin/assets"),
+        fetchJson<AdminRpaTask[]>("/api/admin/rpa-tasks")
       ]);
       setDirectories(nextDirectories);
       setAssetTypes(nextTypes);
       setAssets(nextAssets);
+      setRpaTasks(nextRpaTasks);
     } catch (loadError) {
       const text = loadError instanceof Error ? loadError.message : "后台数据加载失败";
       setError(text);
@@ -888,6 +1201,28 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
     }
   }
 
+  async function saveRpaTask() {
+    if (!editingRpaTaskId) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      await sendJson(`/api/admin/rpa-tasks/${encodeURIComponent(editingRpaTaskId)}`, "PUT", {
+        requirementDocUrl: rpaTaskForm.requirementDocUrl
+      });
+      setRpaTaskForm(emptyRpaTaskForm);
+      setEditingRpaTaskId(null);
+      completeSave("RPA 任务已保存");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "RPA 任务保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function editDirectory(directory: AdminDirectory) {
     setActiveTab("directories");
     setEditingDirectoryId(directory.id);
@@ -928,6 +1263,17 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
       tags: asset.tags.join(", "),
       sortOrder: String(asset.sortOrder),
       status: asset.status
+    });
+  }
+
+  function editRpaTask(task: AdminRpaTask) {
+    setActiveTab("rpaTasks");
+    setEditingRpaTaskId(task.id);
+    setRpaTaskForm({
+      name: task.name,
+      deptName: task.deptName,
+      taskUuid: task.taskUuid ?? "",
+      requirementDocUrl: task.requirementDocUrl ?? ""
     });
   }
 
@@ -1008,6 +1354,13 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
         </button>
         <button className={activeTab === "types" ? "active" : ""} type="button" onClick={() => setActiveTab("types")}>
           应用类型
+        </button>
+        <button
+          className={activeTab === "rpaTasks" ? "active" : ""}
+          type="button"
+          onClick={() => setActiveTab("rpaTasks")}
+        >
+          RPA任务
         </button>
       </div>
 
@@ -1401,6 +1754,106 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
           </div>
         </div>
       ) : null}
+
+      {!loading && activeTab === "rpaTasks" ? (
+        <div className="adminGrid">
+          <form className="adminCard adminForm" onSubmit={(event) => event.preventDefault()}>
+            <div className="adminSectionHeader">
+              <div>
+                <h2>{editingRpaTaskId ? "编辑 RPA 任务" : "选择 RPA 任务"}</h2>
+                <p>仅维护需求文档链接，任务名称、部门和 UUID 为只读。</p>
+              </div>
+            </div>
+            <div className="formGrid">
+              <label>
+                任务名称
+                <input value={rpaTaskForm.name} disabled />
+              </label>
+              <label>
+                所属部门
+                <input value={rpaTaskForm.deptName} disabled />
+              </label>
+              <label className="wideField">
+                task_uuid
+                <input value={rpaTaskForm.taskUuid} disabled />
+              </label>
+              <label className="wideField">
+                需求文档链接
+                <input
+                  value={rpaTaskForm.requirementDocUrl}
+                  placeholder="https://..."
+                  onChange={(event) =>
+                    setRpaTaskForm({ ...rpaTaskForm, requirementDocUrl: event.target.value })
+                  }
+                />
+              </label>
+            </div>
+            <div className="buttonRow">
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={saving || !editingRpaTaskId}
+                onClick={saveRpaTask}
+              >
+                {saving ? "保存中..." : "保存需求文档"}
+              </button>
+              {editingRpaTaskId ? (
+                <button
+                  className="secondaryButton"
+                  type="button"
+                  onClick={() => {
+                    setEditingRpaTaskId(null);
+                    setRpaTaskForm(emptyRpaTaskForm);
+                  }}
+                >
+                  取消编辑
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          <div className="adminCard adminList">
+            <div className="adminSectionHeader">
+              <div>
+                <h2>RPA 任务列表</h2>
+                <p>共 {rpaTasks.length} 个任务。</p>
+              </div>
+            </div>
+            {rpaTasks.map((task) => (
+              <div className="adminRow" key={task.id}>
+                <div>
+                  <strong>{task.name}</strong>
+                  <p>
+                    {task.deptName} · {task.taskUuid ?? "未配置 task_uuid"} · {task.ownerName || "未填负责人"}
+                  </p>
+                  <div className="tagLine">
+                    <span>{task.status || "未填写状态"}</span>
+                    <span>{task.requirementDocUrl ? "已配置需求文档" : "未配置需求文档"}</span>
+                  </div>
+                </div>
+                <span className={task.requirementDocUrl ? "statusBadge active" : "statusBadge inactive"}>
+                  {task.requirementDocUrl ? "已配置" : "待补充"}
+                </span>
+                <div className="adminActions">
+                  <button type="button" onClick={() => editRpaTask(task)}>
+                    编辑
+                  </button>
+                  {task.requirementDocUrl ? (
+                    <a
+                      className="secondaryButton adminLinkButton"
+                      href={task.requirementDocUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      打开文档
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1432,10 +1885,23 @@ export default function AssetPortal() {
     loading: true,
     error: null
   });
+  const [rpaTasks, setRpaTasks] = useState<ApiState<RpaTask[]>>({
+    data: [],
+    loading: true,
+    error: null
+  });
+  const [rpaRunRecords, setRpaRunRecords] = useState<ApiState<RpaRunRecord[]>>({
+    data: [],
+    loading: true,
+    error: null
+  });
   const [activeView, setActiveView] = useState<ActiveView>("home");
   const [selectedDirectoryId, setSelectedDirectoryId] = useState<number | null>(null);
+  const [selectedRpaDept, setSelectedRpaDept] = useState<string | null>(null);
+  const [selectedRpaLogTask, setSelectedRpaLogTask] = useState<RpaTask | null>(null);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [collapsedDirectoryIds, setCollapsedDirectoryIds] = useState<Set<number>>(new Set());
+  const [rpaCollapsed, setRpaCollapsed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [keyword, setKeyword] = useState("");
@@ -1467,6 +1933,20 @@ export default function AssetPortal() {
   }, []);
 
   useEffect(() => {
+    fetchJson<RpaTask[]>("/api/rpa/tasks")
+      .then((data) => setRpaTasks({ data, loading: false, error: null }))
+      .catch((error: Error) =>
+        setRpaTasks({ data: [], loading: false, error: error.message })
+      );
+
+    fetchJson<RpaRunRecord[]>("/api/rpa/run-records?limit=300")
+      .then((data) => setRpaRunRecords({ data, loading: false, error: null }))
+      .catch((error: Error) =>
+        setRpaRunRecords({ data: [], loading: false, error: error.message })
+      );
+  }, []);
+
+  useEffect(() => {
     const statsParams = new URLSearchParams();
     if (statsStartDate) {
       statsParams.set("startDate", statsStartDate);
@@ -1487,7 +1967,7 @@ export default function AssetPortal() {
   }, [statsStartDate, statsEndDate, statsType]);
 
   useEffect(() => {
-    if (activeView === "stats" || activeView === "admin") {
+    if (activeView === "stats" || activeView === "admin" || activeView === "rpa" || activeView === "rpaLogs") {
       return;
     }
 
@@ -1533,6 +2013,25 @@ export default function AssetPortal() {
   const assetTypeMap = useMemo(() => {
     return new Map(assetTypes.data.map((assetType) => [assetType.code, assetType]));
   }, [assetTypes.data]);
+  const rpaDepartments = useMemo(() => {
+    return Array.from(new Set(rpaTasks.data.map((task) => task.deptName))).sort((left, right) =>
+      left.localeCompare(right, "zh-Hans-CN")
+    );
+  }, [rpaTasks.data]);
+  const filteredRpaTasks = useMemo(() => {
+    if (!selectedRpaDept) {
+      return rpaTasks.data;
+    }
+
+    return rpaTasks.data.filter((task) => task.deptName === selectedRpaDept);
+  }, [rpaTasks.data, selectedRpaDept]);
+  const selectedRpaLogRecords = useMemo(() => {
+    if (!selectedRpaLogTask?.taskUuid) {
+      return [];
+    }
+
+    return rpaRunRecords.data.filter((record) => record.taskUuid === selectedRpaLogTask.taskUuid);
+  }, [rpaRunRecords.data, selectedRpaLogTask]);
 
   function toggleDirectory(directoryId: number) {
     setCollapsedDirectoryIds((current) => {
@@ -1559,6 +2058,19 @@ export default function AssetPortal() {
   function openStats() {
     setActiveView("stats");
     setSelectedDirectoryId(null);
+  }
+
+  function openRpa(deptName: string | null = null) {
+    setActiveView("rpa");
+    setSelectedDirectoryId(null);
+    setSelectedRpaDept(deptName);
+    setSelectedRpaLogTask(null);
+  }
+
+  function openRpaLogs(task: RpaTask) {
+    setActiveView("rpaLogs");
+    setSelectedDirectoryId(null);
+    setSelectedRpaLogTask(task);
   }
 
   function openAdmin() {
@@ -1640,6 +2152,45 @@ export default function AssetPortal() {
           </button>
         ) : null}
 
+        <div className="navGroup">
+          <div className={activeView === "rpa" ? "parentNav active" : "parentNav"}>
+            <button
+              className="collapseControl"
+              type="button"
+              onClick={() => setRpaCollapsed((value) => !value)}
+              title={rpaCollapsed ? "展开实在RPA" : "收起实在RPA"}
+            >
+              {rpaCollapsed ? "▸" : "▾"}
+            </button>
+            <button className="parentLabel" type="button" onClick={() => openRpa(null)}>
+              <span>▣</span>
+              <strong>实在RPA</strong>
+            </button>
+          </div>
+
+          {!rpaCollapsed ? (
+            <div className="childNavList">
+              {rpaTasks.loading ? <p className="navState">RPA 加载中...</p> : null}
+              {rpaTasks.error ? <p className="errorText">{rpaTasks.error}</p> : null}
+              {rpaDepartments.map((deptName) => (
+                <div className="parentNav" key={deptName}>
+                  <button className="collapseControl" type="button" onClick={() => openRpa(deptName)}>
+                    ·
+                  </button>
+                  <button
+                    className="parentLabel"
+                    type="button"
+                    onClick={() => openRpa(deptName)}
+                  >
+                    <span>□</span>
+                    <strong>{deptName}</strong>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
         <nav className="directoryNav" aria-label="资产目录">
           {directories.loading ? <p className="navState">目录加载中...</p> : null}
           {directories.error ? <p className="errorText">{directories.error}</p> : null}
@@ -1685,7 +2236,25 @@ export default function AssetPortal() {
           ) : null}
         </div>
 
-        {activeView === "admin" && currentUser?.isAdmin ? (
+        {activeView === "rpaLogs" && selectedRpaLogTask ? (
+          <RpaLogPanel
+            task={selectedRpaLogTask}
+            records={selectedRpaLogRecords}
+            loading={rpaRunRecords.loading}
+            error={rpaRunRecords.error}
+            onBack={() => openRpa(selectedRpaLogTask.deptName)}
+          />
+        ) : activeView === "rpa" ? (
+          <RpaTaskPanel
+            tasks={filteredRpaTasks}
+            departments={rpaDepartments}
+            selectedDept={selectedRpaDept}
+            loading={rpaTasks.loading}
+            error={rpaTasks.error}
+            onSelectDept={setSelectedRpaDept}
+            onViewLogs={openRpaLogs}
+          />
+        ) : activeView === "admin" && currentUser?.isAdmin ? (
           <AdminPanel onDataChanged={refreshPortalData} />
         ) : activeView === "stats" ? (
           <EnhancedStatsReport
@@ -1828,4 +2397,3 @@ export default function AssetPortal() {
     </main>
   );
 }
-

@@ -60,6 +60,17 @@ export type AdminAsset = {
   updatedAt: string;
 };
 
+export type AdminRpaTask = {
+  id: string;
+  taskUuid: string | null;
+  deptName: string;
+  name: string;
+  ownerName: string | null;
+  status: string | null;
+  requirementDocUrl: string | null;
+  updatedAt: string | null;
+};
+
 type DirectoryRow = RowDataPacket & {
   id: number;
   parent_id: number | null;
@@ -100,6 +111,12 @@ type AssetRow = RowDataPacket & {
   updated_at: Date;
 };
 
+type ColumnRow = RowDataPacket & {
+  column_name: string;
+};
+
+type GenericRpaRow = RowDataPacket & Record<string, unknown>;
+
 function toIso(value: Date) {
   return value.toISOString();
 }
@@ -137,6 +154,50 @@ function cleanCode(value: unknown) {
     .replace(/[^a-z0-9_-]/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function valueToString(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  return String(value);
+}
+
+function getValue(row: GenericRpaRow, column: string | null) {
+  return column ? valueToString(row[column]) : null;
+}
+
+function escapeIdentifier(identifier: string) {
+  return `\`${identifier.replace(/`/g, "``")}\``;
+}
+
+async function getTableColumns(tableName: string) {
+  const [rows] = await getPool().execute<ColumnRow[]>(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = :tableName`,
+    { tableName }
+  );
+
+  return rows.map((row) => row.column_name);
+}
+
+function pickColumn(columns: string[], candidates: string[]) {
+  const normalized = new Map(columns.map((column) => [column.toLowerCase(), column]));
+  for (const candidate of candidates) {
+    const column = normalized.get(candidate.toLowerCase());
+    if (column) {
+      return column;
+    }
+  }
+
+  return null;
 }
 
 function cleanTags(value: unknown) {
@@ -456,6 +517,83 @@ export async function updateAdminAsset(id: number, input: unknown): Promise<void
       tags: JSON.stringify(cleanTags(body.tags)),
       sortOrder: cleanNumber(body.sortOrder),
       status: cleanStatus(body.status)
+    }
+  );
+}
+
+const rpaTaskIdColumns = ["id", "task_id", "rpa_task_id"];
+const rpaTaskUuidColumns = ["task_uuid"];
+const rpaTaskNameColumns = ["task_name", "name", "task_title", "title", "program_name", "job_name"];
+const rpaTaskOwnerColumns = ["owner_name", "owner", "created_by", "creator", "responsible_person", "user_name"];
+const rpaTaskStatusColumns = ["status", "task_status", "state"];
+const rpaTaskUpdatedAtColumns = ["updated_at", "update_time", "update_date", "modify_time", "last_update_time"];
+const rpaTaskRequirementDocUrlColumns = ["requirement_doc_url"];
+
+async function getAdminRpaTaskColumnConfig() {
+  const columns = await getTableColumns("rpa_task");
+  const idColumn = pickColumn(columns, rpaTaskIdColumns);
+  const requirementDocUrlColumn = pickColumn(columns, rpaTaskRequirementDocUrlColumns);
+
+  if (!columns.includes("dept_name")) {
+    throw new Error("rpa_task 表缺少 dept_name 字段");
+  }
+  if (!idColumn) {
+    throw new Error("rpa_task 表缺少任务主键字段，请使用 id、task_id 或 rpa_task_id");
+  }
+  if (!requirementDocUrlColumn) {
+    throw new Error("rpa_task 表缺少 requirement_doc_url 字段");
+  }
+
+  return {
+    idColumn,
+    requirementDocUrlColumn,
+    taskUuidColumn: pickColumn(columns, rpaTaskUuidColumns),
+    nameColumn: pickColumn(columns, rpaTaskNameColumns),
+    ownerColumn: pickColumn(columns, rpaTaskOwnerColumns),
+    statusColumn: pickColumn(columns, rpaTaskStatusColumns),
+    updatedAtColumn: pickColumn(columns, rpaTaskUpdatedAtColumns)
+  };
+}
+
+function mapAdminRpaTask(
+  row: GenericRpaRow,
+  config: Awaited<ReturnType<typeof getAdminRpaTaskColumnConfig>>
+): AdminRpaTask {
+  const id = getValue(row, config.idColumn) ?? "";
+
+  return {
+    id,
+    taskUuid: getValue(row, config.taskUuidColumn),
+    deptName: getValue(row, "dept_name") || "未分组",
+    name: getValue(row, config.nameColumn) ?? `RPA 任务 ${id}`,
+    ownerName: getValue(row, config.ownerColumn),
+    status: getValue(row, config.statusColumn),
+    requirementDocUrl: getValue(row, config.requirementDocUrlColumn),
+    updatedAt: getValue(row, config.updatedAtColumn)
+  };
+}
+
+export async function listAdminRpaTasks(): Promise<AdminRpaTask[]> {
+  const config = await getAdminRpaTaskColumnConfig();
+  const orderBy = config.nameColumn
+    ? `ORDER BY dept_name ASC, ${escapeIdentifier(config.nameColumn)} ASC`
+    : "ORDER BY dept_name ASC";
+  const [rows] = await getPool().query<GenericRpaRow[]>(`SELECT * FROM rpa_task ${orderBy}`);
+
+  return rows.map((row) => mapAdminRpaTask(row, config));
+}
+
+export async function updateAdminRpaTask(id: string, input: unknown): Promise<void> {
+  const body = input as Record<string, unknown>;
+  const config = await getAdminRpaTaskColumnConfig();
+
+  await getPool().execute(
+    `UPDATE rpa_task
+     SET ${escapeIdentifier(config.requirementDocUrlColumn)} = :requirementDocUrl
+     WHERE ${escapeIdentifier(config.idColumn)} = :id`,
+    {
+      id,
+      requirementDocUrl: cleanNullableText(body.requirementDocUrl, 1000)
     }
   );
 }
