@@ -9,7 +9,6 @@ out/
 build/
 
 # env
-.env
 .env*.local
 .env.production
 
