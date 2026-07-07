@@ -42,6 +42,17 @@ type RpaRunRecord = {
   message: string | null;
 };
 
+type RpaRunRecordPage = {
+  items: RpaRunRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+const assetListPageSize = 10;
+const rpaTaskPageSize = 10;
+
 type AdminStatus = "active" | "inactive";
 
 type AdminDirectory = Directory & {
@@ -343,6 +354,51 @@ function FavoriteToggleButton({
   );
 }
 
+function PaginationControls({
+  currentPage,
+  totalPages,
+  totalItems,
+  pageSize,
+  loading,
+  onPrevPage,
+  onNextPage
+}: {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  loading: boolean;
+  onPrevPage: () => void;
+  onNextPage: () => void;
+}) {
+  if (totalItems <= pageSize || totalPages <= 1) {
+    return null;
+  }
+
+  const isFirstPage = currentPage <= 1;
+  const isLastPage = currentPage >= totalPages;
+
+  return (
+    <div className="paginationBar">
+      <p className="paginationMeta">
+        第 {currentPage} / {totalPages} 页，共 {totalItems} 条
+      </p>
+      <div className="paginationActions">
+        {!isFirstPage ? (
+          <button className="paginationButton" type="button" onClick={onPrevPage} disabled={loading}>
+            上一页
+          </button>
+        ) : null}
+        {!isLastPage ? (
+          <button className="paginationButton" type="button" onClick={onNextPage} disabled={loading}>
+            下一页
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function AssetListPanel({
   title,
   description,
@@ -368,6 +424,23 @@ function AssetListPanel({
   favoritePendingIds: Set<number>;
   onToggleFavorite: (assetId: number) => void;
 }) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(assets.length / assetListPageSize));
+  const paginatedAssets = useMemo(() => {
+    const offset = (currentPage - 1) * assetListPageSize;
+    return assets.slice(offset, offset + assetListPageSize);
+  }, [assets, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [title, keyword]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   return (
     <div className="assetTablePanel">
       <div className="panelTitleRow">
@@ -419,7 +492,7 @@ function AssetListPanel({
             <span>部门</span>
             <span>标签</span>
           </div>
-          {assets.map((asset) => (
+          {paginatedAssets.map((asset) => (
             <div className="assetTableRow" key={asset.id}>
               <div>
                 <div className="assetTitleBar">
@@ -452,12 +525,25 @@ function AssetListPanel({
           ))}
         </div>
       ) : null}
+
+      <PaginationControls
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={assets.length}
+        pageSize={assetListPageSize}
+        loading={loading}
+        onPrevPage={() => setCurrentPage((page) => Math.max(1, page - 1))}
+        onNextPage={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+      />
     </div>
   );
 }
 
 function RpaTaskPanel({
   tasks,
+  totalTasks,
+  currentPage,
+  totalPages,
   departments,
   statuses,
   selectedDept,
@@ -469,9 +555,14 @@ function RpaTaskPanel({
   onSelectDept,
   onSelectStatus,
   onResetFilters,
-  onViewLogs
+  onViewLogs,
+  onPrevPage,
+  onNextPage
 }: {
   tasks: RpaTask[];
+  totalTasks: number;
+  currentPage: number;
+  totalPages: number;
   departments: string[];
   statuses: string[];
   selectedDept: string | null;
@@ -484,15 +575,19 @@ function RpaTaskPanel({
   onSelectStatus: (status: string | null) => void;
   onResetFilters: () => void;
   onViewLogs: (task: RpaTask) => void;
+  onPrevPage: () => void;
+  onNextPage: () => void;
 }) {
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startFeedback, setStartFeedback] = useState<{
+    taskId: string;
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   async function startTask(task: RpaTask) {
     setStartingTaskId(task.id);
-    setMessage(null);
-    setStartError(null);
+    setStartFeedback(null);
 
     try {
       const response = await fetch(withBasePath(`/api/rpa/tasks/${encodeURIComponent(task.id)}/start`), {
@@ -505,9 +600,17 @@ function RpaTaskPanel({
         throw new Error(payload.error ?? "启动请求失败");
       }
 
-      setMessage(`${task.name}：${payload.data?.message ?? "启动请求已发送"}`);
+      setStartFeedback({
+        taskId: task.id,
+        type: "success",
+        message: payload.data?.message ?? "启动请求已发送"
+      });
     } catch (error) {
-      setStartError(error instanceof Error ? error.message : "启动请求失败");
+      setStartFeedback({
+        taskId: task.id,
+        type: "error",
+        message: error instanceof Error ? error.message : "启动请求失败"
+      });
     } finally {
       setStartingTaskId(null);
     }
@@ -562,12 +665,9 @@ function RpaTaskPanel({
         <div className="panelTitleRow">
           <div>
             <h2>RPA 任务</h2>
-            <p>当前共 {tasks.length} 个任务。</p>
+            <p>当前共 {totalTasks} 个任务，每页 {rpaTaskPageSize} 条。</p>
           </div>
         </div>
-
-        {message ? <div className="adminNotice success">{message}</div> : null}
-        {startError ? <div className="adminNotice error">{startError}</div> : null}
 
         {error ? (
           <div className="emptyState">
@@ -591,56 +691,76 @@ function RpaTaskPanel({
         {!loading && !error && tasks.length === 0 ? (
           <div className="emptyState">
             <h3>暂无 RPA 任务</h3>
-            <p>请确认 rpa_task 表已有数据，并且包含 dept_name 字段。</p>
           </div>
         ) : null}
 
-        <div className="rpaTable">
-          <div className="rpaTableHead">
-            <span>任务名称</span>
-            <span>部门</span>
-            <span>需求文档</span>
-            <span>状态</span>
-            <span>更新时间</span>
-            <span>操作</span>
-            <span>日志</span>
-          </div>
-          {tasks.map((task) => (
-            <div className="rpaTableRow" key={task.id}>
-              <div>
-                <strong>{task.name}</strong>
-              </div>
-              <span>{task.deptName}</span>
-              <span>
-                {task.requirementDocUrl ? (
-                  <a className="assetNameLink inlineLink" href={task.requirementDocUrl} target="_blank" rel="noreferrer">
-                    查看文档
-                  </a>
-                ) : (
-                  "未填写"
-                )}
-              </span>
-              <span>{task.status || "未填写"}</span>
-              <span>{task.updatedAt ? task.updatedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
-              <button
-                className="rpaActionButton"
-                type="button"
-                disabled={startingTaskId === task.id}
-                onClick={() => startTask(task)}
-              >
-                {startingTaskId === task.id ? "启动中..." : "启动程序"}
-              </button>
-              <button
-                className="rpaActionButton secondary"
-                type="button"
-                disabled={!task.taskUuid}
-                onClick={() => onViewLogs(task)}
-              >
-                日志
-              </button>
+        {tasks.length > 0 ? (
+          <div className="rpaTable">
+            <div className="rpaTableHead">
+              <span>任务名称</span>
+              <span>部门</span>
+              <span>需求文档</span>
+              <span>状态</span>
+              <span>更新时间</span>
+              <span>操作</span>
+              <span>日志</span>
             </div>
-          ))}
-        </div>
+            {tasks.map((task) => (
+              <div className="rpaTableRow" key={task.id}>
+                <div>
+                  <strong>{task.name}</strong>
+                </div>
+                <span>{task.deptName}</span>
+                <span>
+                  {task.requirementDocUrl ? (
+                    <a className="assetNameLink inlineLink" href={task.requirementDocUrl} target="_blank" rel="noreferrer">
+                      查看文档
+                    </a>
+                  ) : (
+                    "未填写"
+                  )}
+                </span>
+                <span>{task.status || "未填写"}</span>
+                <span>{task.updatedAt ? task.updatedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
+                <div className="rpaActionCell">
+                  {startFeedback?.taskId === task.id ? (
+                    <span className={startFeedback.type === "success" ? "rpaInlineNotice success" : "rpaInlineNotice error"}>
+                      {startFeedback.message}
+                    </span>
+                  ) : null}
+                  <button
+                    className="rpaActionButton"
+                    type="button"
+                    disabled={startingTaskId === task.id}
+                    onClick={() => startTask(task)}
+                  >
+                    {startingTaskId === task.id ? "启动中..." : "启动程序"}
+                  </button>
+                </div>
+                <button
+                  className="rpaActionButton secondary"
+                  type="button"
+                  disabled={!task.taskUuid}
+                  onClick={() => onViewLogs(task)}
+                >
+                  日志
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {!error ? (
+          <PaginationControls
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalTasks}
+            pageSize={rpaTaskPageSize}
+            loading={loading}
+            onPrevPage={onPrevPage}
+            onNextPage={onNextPage}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -648,17 +768,23 @@ function RpaTaskPanel({
 
 function RpaLogPanel({
   task,
-  records,
+  recordPage,
   loading,
   error,
-  onBack
+  onBack,
+  onPrevPage,
+  onNextPage
 }: {
   task: RpaTask;
-  records: RpaRunRecord[];
+  recordPage: RpaRunRecordPage;
   loading: boolean;
   error: string | null;
   onBack: () => void;
+  onPrevPage: () => void;
+  onNextPage: () => void;
 }) {
+  const records = recordPage.items;
+
   return (
     <section className="directoryDetail">
       <div className="detailHeader">
@@ -677,7 +803,7 @@ function RpaLogPanel({
         <div className="panelTitleRow">
           <div>
             <h2>运行记录</h2>
-            <p>只展示当前 RPA 程序的 rpa_run_record 记录。</p>
+            <p>只展示当前 RPA 程序的 rpa_run_record 记录，每页 10 条。</p>
           </div>
         </div>
 
@@ -707,31 +833,45 @@ function RpaLogPanel({
           </div>
         ) : null}
 
-        <div className="rpaRecordTable">
-          <div className="rpaRecordTableHead">
-            <span>任务名称</span>
-            <span>部门</span>
-            <span>状态</span>
-            <span>开始时间</span>
-            <span>结束时间</span>
-            <span>耗时</span>
-            <span>执行信息</span>
-          </div>
-          {records.map((record) => (
-            <div className="rpaRecordTableRow" key={record.id}>
-              <div>
-                <strong>{record.taskName ?? task.name}</strong>
-                <p>{record.operatorName ? `操作人：${record.operatorName}` : "未记录操作人"}</p>
-              </div>
-              <span>{task.deptName}</span>
-              <span>{record.statusDesc || record.status || "未填写"}</span>
-              <span>{record.startedAt ? record.startedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
-              <span>{record.endedAt ? record.endedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
-              <span>{record.duration || "未填写"}</span>
-              <span>{record.message || "无"}</span>
+        {records.length > 0 ? (
+          <div className="rpaRecordTable">
+            <div className="rpaRecordTableHead">
+              <span>任务名称</span>
+              <span>部门</span>
+              <span>状态</span>
+              <span>开始时间</span>
+              <span>结束时间</span>
+              <span>耗时</span>
+              <span>执行信息</span>
             </div>
-          ))}
-        </div>
+            {records.map((record) => (
+              <div className="rpaRecordTableRow" key={record.id}>
+                <div>
+                  <strong>{record.taskName ?? task.name}</strong>
+                  <p>{record.operatorName ? `操作人：${record.operatorName}` : "未记录操作人"}</p>
+                </div>
+                <span>{task.deptName}</span>
+                <span>{record.statusDesc || record.status || "未填写"}</span>
+                <span>{record.startedAt ? record.startedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
+                <span>{record.endedAt ? record.endedAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
+                <span>{record.duration || "未填写"}</span>
+                <span>{record.message || "无"}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {!error ? (
+          <PaginationControls
+            currentPage={recordPage.page}
+            totalPages={recordPage.totalPages}
+            totalItems={recordPage.total}
+            pageSize={recordPage.pageSize}
+            loading={loading}
+            onPrevPage={onPrevPage}
+            onNextPage={onNextPage}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -1996,11 +2136,13 @@ export default function AssetPortal() {
     loading: true,
     error: null
   });
-  const [rpaRunRecords, setRpaRunRecords] = useState<ApiState<RpaRunRecord[]>>({
-    data: [],
-    loading: true,
+  const [rpaRunRecords, setRpaRunRecords] = useState<ApiState<RpaRunRecordPage>>({
+    data: { items: [], total: 0, page: 1, pageSize: 10, totalPages: 1 },
+    loading: false,
     error: null
   });
+  const [rpaTaskPage, setRpaTaskPage] = useState(1);
+  const [rpaRunRecordPage, setRpaRunRecordPage] = useState(1);
   const [activeView, setActiveView] = useState<ActiveView>("home");
   const [selectedDirectoryId, setSelectedDirectoryId] = useState<number | null>(null);
   const [selectedRpaDept, setSelectedRpaDept] = useState<string | null>(null);
@@ -2048,12 +2190,6 @@ export default function AssetPortal() {
       .then((data) => setRpaTasks({ data, loading: false, error: null }))
       .catch((error: Error) =>
         setRpaTasks({ data: [], loading: false, error: error.message })
-      );
-
-    fetchJson<RpaRunRecord[]>("/api/rpa/run-records?limit=300")
-      .then((data) => setRpaRunRecords({ data, loading: false, error: null }))
-      .catch((error: Error) =>
-        setRpaRunRecords({ data: [], loading: false, error: error.message })
       );
   }, []);
 
@@ -2156,13 +2292,41 @@ export default function AssetPortal() {
       return true;
     });
   }, [rpaTasks.data, selectedRpaDept, selectedRpaStatus, rpaKeyword]);
-  const selectedRpaLogRecords = useMemo(() => {
-    if (!selectedRpaLogTask?.taskUuid) {
-      return [];
+  const paginatedRpaTasks = useMemo(() => {
+    const offset = (rpaTaskPage - 1) * rpaTaskPageSize;
+    return filteredRpaTasks.slice(offset, offset + rpaTaskPageSize);
+  }, [filteredRpaTasks, rpaTaskPage]);
+  const rpaTaskTotalPages = Math.max(1, Math.ceil(filteredRpaTasks.length / rpaTaskPageSize));
+  const selectedRpaLogRecords = rpaRunRecords.data;
+
+  useEffect(() => {
+    setRpaTaskPage(1);
+  }, [selectedRpaDept, selectedRpaStatus, rpaKeyword]);
+
+  useEffect(() => {
+    if (rpaTaskPage > rpaTaskTotalPages) {
+      setRpaTaskPage(rpaTaskTotalPages);
+    }
+  }, [rpaTaskPage, rpaTaskTotalPages]);
+
+  useEffect(() => {
+    if (activeView !== "rpaLogs" || !selectedRpaLogTask?.taskUuid) {
+      return;
     }
 
-    return rpaRunRecords.data.filter((record) => record.taskUuid === selectedRpaLogTask.taskUuid);
-  }, [rpaRunRecords.data, selectedRpaLogTask]);
+    setRpaRunRecords((current) => ({ ...current, loading: true, error: null }));
+    fetchJson<RpaRunRecordPage>(
+      `/api/rpa/run-records?page=${rpaRunRecordPage}&pageSize=10&taskUuid=${encodeURIComponent(selectedRpaLogTask.taskUuid)}`
+    )
+      .then((data) => setRpaRunRecords({ data, loading: false, error: null }))
+      .catch((error: Error) =>
+        setRpaRunRecords({
+          data: { items: [], total: 0, page: 1, pageSize: 10, totalPages: 1 },
+          loading: false,
+          error: error.message
+        })
+      );
+  }, [activeView, selectedRpaLogTask, rpaRunRecordPage]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -2214,16 +2378,25 @@ export default function AssetPortal() {
     setActiveView("rpa");
     setSelectedDirectoryId(null);
     setSelectedRpaDept(deptName);
+    setRpaTaskPage(1);
     setSelectedRpaLogTask(null);
+    setRpaRunRecordPage(1);
+    setRpaRunRecords({
+      data: { items: [], total: 0, page: 1, pageSize: 10, totalPages: 1 },
+      loading: false,
+      error: null
+    });
   }
 
   function resetRpaFilters() {
     setRpaKeyword("");
     setSelectedRpaDept(null);
     setSelectedRpaStatus(null);
+    setRpaTaskPage(1);
   }
 
   function openRpaLogs(task: RpaTask) {
+    setRpaRunRecordPage(1);
     setActiveView("rpaLogs");
     setSelectedDirectoryId(null);
     setSelectedRpaLogTask(task);
@@ -2420,6 +2593,9 @@ export default function AssetPortal() {
         <div className="topBar">
           {currentUser ? (
             <div className="userMenuBar">
+              <a className="topHelpButton" href={withBasePath("/manual")} title="查看使用说明" aria-label="查看使用说明">
+                ?
+              </a>
               <div className="userMenu">
                 <button
                   className="userMenuTrigger"
@@ -2449,14 +2625,23 @@ export default function AssetPortal() {
         {activeView === "rpaLogs" && selectedRpaLogTask ? (
           <RpaLogPanel
             task={selectedRpaLogTask}
-            records={selectedRpaLogRecords}
+            recordPage={selectedRpaLogRecords}
             loading={rpaRunRecords.loading}
             error={rpaRunRecords.error}
             onBack={() => openRpa(selectedRpaLogTask.deptName)}
+            onPrevPage={() => setRpaRunRecordPage((current) => Math.max(1, current - 1))}
+            onNextPage={() =>
+              setRpaRunRecordPage((current) =>
+                Math.min(selectedRpaLogRecords.totalPages, current + 1)
+              )
+            }
           />
         ) : activeView === "rpa" ? (
           <RpaTaskPanel
-            tasks={filteredRpaTasks}
+            tasks={paginatedRpaTasks}
+            totalTasks={filteredRpaTasks.length}
+            currentPage={rpaTaskPage}
+            totalPages={rpaTaskTotalPages}
             departments={rpaDepartments}
             statuses={rpaStatuses}
             selectedDept={selectedRpaDept}
@@ -2469,6 +2654,8 @@ export default function AssetPortal() {
             onSelectStatus={setSelectedRpaStatus}
             onResetFilters={resetRpaFilters}
             onViewLogs={openRpaLogs}
+            onPrevPage={() => setRpaTaskPage((current) => Math.max(1, current - 1))}
+            onNextPage={() => setRpaTaskPage((current) => Math.min(rpaTaskTotalPages, current + 1))}
           />
         ) : activeView === "admin" && currentUser?.isAdmin ? (
           <AdminPanel onDataChanged={refreshPortalData} />

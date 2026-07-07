@@ -26,6 +26,14 @@ export type RpaRunRecord = {
   message: string | null;
 };
 
+export type RpaRunRecordPage = {
+  items: RpaRunRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 type ColumnRow = RowDataPacket & {
   column_name: string;
 };
@@ -46,7 +54,7 @@ const recordTaskUuidColumns = ["task_uuid"];
 const recordTaskNameColumns = ["task_name", "name", "task_title", "title", "program_name"];
 const recordStatusColumns = ["status", "run_status", "result_status", "state", "result"];
 const recordStatusDescColumns = ["status_desc"];
-const recordStartedAtColumns = ["start_time", "started_at", "begin_time", "run_start_time", "create_time", "created_at"];
+const recordStartedAtColumns = ["created_time", "start_time", "started_at", "begin_time", "run_start_time", "create_time", "created_at"];
 const recordEndedAtColumns = ["end_time", "ended_at", "finished_at", "finish_time", "run_end_time", "update_time", "updated_at"];
 const recordDurationColumns = ["duration", "run_duration", "cost_time", "elapsed_time", "time_cost"];
 const recordOperatorColumns = ["operator_name", "operator", "user_name", "created_by", "creator", "runner_name"];
@@ -171,12 +179,18 @@ export async function getRpaTask(taskId: string): Promise<RpaTask | null> {
   return rows[0] ? mapRpaTask(rows[0], config) : null;
 }
 
-export async function listRpaRunRecords(options: { limit?: number } = {}): Promise<RpaRunRecord[]> {
+export async function listRpaRunRecords(options: {
+  page?: number;
+  pageSize?: number;
+  taskUuid?: string;
+} = {}): Promise<RpaRunRecordPage> {
   const columns = await getTableColumns("rpa_run_record");
   const idColumn = pickColumn(columns, recordIdColumns);
   const taskUuidColumn = pickColumn(columns, recordTaskUuidColumns);
   const startedAtColumn = pickColumn(columns, recordStartedAtColumns);
-  const limit = Math.min(Math.max(options.limit ?? 300, 1), 1000);
+  const pageSize = Math.min(Math.max(options.pageSize ?? 10, 1), 100);
+  const page = Math.max(options.page ?? 1, 1);
+  const offset = (page - 1) * pageSize;
 
   if (!idColumn) {
     throw new Error("rpa_run_record 表缺少运行记录主键字段，请使用 id、record_id 或 run_id");
@@ -188,7 +202,17 @@ export async function listRpaRunRecords(options: { limit?: number } = {}): Promi
   const orderBy = startedAtColumn
     ? `ORDER BY ${escapeIdentifier(startedAtColumn)} DESC`
     : `ORDER BY ${escapeIdentifier(idColumn)} DESC`;
-  const [rows] = await getPool().query<GenericRow[]>(`SELECT * FROM rpa_run_record ${orderBy} LIMIT ${limit}`);
+  const where = options.taskUuid ? `WHERE ${escapeIdentifier(taskUuidColumn)} = :taskUuid` : "";
+  const params = options.taskUuid ? { taskUuid: options.taskUuid } : {};
+  const [countRows] = await getPool().execute<RowDataPacket[]>(
+    `SELECT COUNT(*) AS total FROM rpa_run_record ${where}`,
+    params
+  );
+  const total = Number(countRows[0]?.total ?? 0);
+  const [rows] = await getPool().execute<GenericRow[]>(
+    `SELECT * FROM rpa_run_record ${where} ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
+    params
+  );
 
   const taskNameColumn = pickColumn(columns, recordTaskNameColumns);
   const statusColumn = pickColumn(columns, recordStatusColumns);
@@ -198,16 +222,22 @@ export async function listRpaRunRecords(options: { limit?: number } = {}): Promi
   const operatorColumn = pickColumn(columns, recordOperatorColumns);
   const messageColumn = pickColumn(columns, recordMessageColumns);
 
-  return rows.map((row) => ({
-    id: getValue(row, idColumn) ?? "",
-    taskUuid: getValue(row, taskUuidColumn),
-    taskName: getValue(row, taskNameColumn),
-    status: getValue(row, statusColumn),
-    statusDesc: getValue(row, statusDescColumn),
-    startedAt: getValue(row, startedAtColumn),
-    endedAt: getValue(row, endedAtColumn),
-    duration: getValue(row, durationColumn),
-    operatorName: getValue(row, operatorColumn),
-    message: getValue(row, messageColumn)
-  }));
+  return {
+    items: rows.map((row) => ({
+      id: getValue(row, idColumn) ?? "",
+      taskUuid: getValue(row, taskUuidColumn),
+      taskName: getValue(row, taskNameColumn),
+      status: getValue(row, statusColumn),
+      statusDesc: getValue(row, statusDescColumn),
+      startedAt: getValue(row, startedAtColumn),
+      endedAt: getValue(row, endedAtColumn),
+      duration: getValue(row, durationColumn),
+      operatorName: getValue(row, operatorColumn),
+      message: getValue(row, messageColumn)
+    })),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize))
+  };
 }

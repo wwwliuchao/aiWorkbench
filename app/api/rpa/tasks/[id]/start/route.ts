@@ -5,12 +5,59 @@ import { getRpaTask } from "@/lib/rpa";
 export const dynamic = "force-dynamic";
 
 const rpaOperationUrl = "https://z-commander-api.ai-indeed.com/openAPI/v2/job/operation";
+const restcloudNotifyUrl = "http://10.20.0.231:8080/restcloud/ods/etl_flow_3392903036";
+const restcloudAppKey = "5eecbdfe8dcb0814749d9edc";
+const minRpaTriggerIntervalMs = 30_000;
+const rpaTaskLastTriggeredAt = new Map<string, number>();
 
 type RouteContext = {
   params: {
     id: string;
   };
 };
+
+function getCooldownRemainingMs(taskId: string) {
+  const lastTriggeredAt = rpaTaskLastTriggeredAt.get(taskId);
+  if (!lastTriggeredAt) {
+    return 0;
+  }
+
+  return Math.max(0, minRpaTriggerIntervalMs - (Date.now() - lastTriggeredAt));
+}
+
+function parseJsonSafe(rawText: string) {
+  try {
+    return rawText ? JSON.parse(rawText) : null;
+  } catch {
+    return rawText || null;
+  }
+}
+
+async function notifyRestcloudLater(taskId: string, taskUuid: string) {
+  const notifyUrl = new URL(restcloudNotifyUrl);
+  notifyUrl.searchParams.set("appkey", restcloudAppKey);
+
+  const notifyResponse = await fetch(notifyUrl.toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      data: [{ taskId: taskUuid }]
+    })
+  });
+
+  const notifyRawText = await notifyResponse.text();
+
+  if (!notifyResponse.ok) {
+    console.error("Restcloud notify failed", {
+      taskId,
+      taskUuid,
+      status: notifyResponse.status,
+      payload: parseJsonSafe(notifyRawText)
+    });
+  }
+}
 
 export async function POST(_request: Request, context: RouteContext) {
   const currentUser = getCurrentUser();
@@ -21,6 +68,16 @@ export async function POST(_request: Request, context: RouteContext) {
   const taskId = decodeURIComponent(context.params.id).trim();
   if (!taskId) {
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
+  }
+
+  const cooldownRemainingMs = getCooldownRemainingMs(taskId);
+  if (cooldownRemainingMs > 0) {
+    return NextResponse.json(
+      {
+        error: `单个 RPA 任务需间隔 30 秒才能再次执行，请等待 ${Math.ceil(cooldownRemainingMs / 1000)} 秒后重试`
+      },
+      { status: 429 }
+    );
   }
 
   try {
@@ -52,14 +109,8 @@ export async function POST(_request: Request, context: RouteContext) {
       })
     });
 
-    const rawText = await upstreamResponse.text();
-    let upstreamPayload: unknown = null;
-
-    try {
-      upstreamPayload = rawText ? JSON.parse(rawText) : null;
-    } catch {
-      upstreamPayload = rawText || null;
-    }
+    const upstreamRawText = await upstreamResponse.text();
+    const upstreamPayload = parseJsonSafe(upstreamRawText);
 
     if (!upstreamResponse.ok) {
       return NextResponse.json(
@@ -71,6 +122,16 @@ export async function POST(_request: Request, context: RouteContext) {
       );
     }
 
+    rpaTaskLastTriggeredAt.set(taskId, Date.now());
+
+    void notifyRestcloudLater(task.id, task.taskUuid).catch((error) => {
+      console.error("Restcloud notify failed", {
+        taskId: task.id,
+        taskUuid: task.taskUuid,
+        error
+      });
+    });
+
     return NextResponse.json({
       data: {
         ok: true,
@@ -79,7 +140,10 @@ export async function POST(_request: Request, context: RouteContext) {
         taskName: task.name,
         operator: currentUser.name,
         message: "启动请求已发送",
-        upstream: upstreamPayload
+        upstream: upstreamPayload,
+        notify: {
+          queued: true
+        }
       }
     });
   } catch (error) {
