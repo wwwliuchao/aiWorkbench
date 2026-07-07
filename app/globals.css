@@ -470,7 +470,7 @@ input {
   max-width: 1680px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 32px 40px;
+  padding: clamp(18px, 2.2vw, 24px) clamp(18px, 2.8vw, 32px) 40px;
 }
 
 .topBar {
@@ -482,6 +482,12 @@ input {
 
 .userMenu {
   position: relative;
+}
+
+.userMenuBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .userMenuTrigger {
@@ -578,6 +584,23 @@ input {
   background: var(--danger-soft);
 }
 
+.topLogoutButton {
+  height: 38px;
+  border: 1px solid rgba(192, 52, 43, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--danger);
+  cursor: pointer;
+  padding: 0 14px;
+  font-weight: 720;
+  box-shadow: var(--shadow-xs);
+}
+
+.topLogoutButton:hover {
+  border-color: rgba(192, 52, 43, 0.28);
+  background: var(--danger-soft);
+}
+
 .directoryDetail,
 .statsReport {
   display: grid;
@@ -599,7 +622,7 @@ input {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.92)),
     var(--surface);
-  padding: 28px 32px;
+  padding: clamp(22px, 2.6vw, 28px) clamp(22px, 3vw, 32px);
 }
 
 .detailHeader p {
@@ -625,7 +648,7 @@ input {
 
 .banner {
   display: flex;
-  min-height: 172px;
+  min-height: clamp(148px, 18vw, 172px);
   align-items: center;
   justify-content: space-between;
   gap: 24px;
@@ -637,7 +660,7 @@ input {
     linear-gradient(135deg, rgba(31, 157, 122, 0.96), rgba(20, 122, 97, 0.94)),
     var(--brand);
   color: #fff;
-  padding: 32px 42px;
+  padding: clamp(24px, 3vw, 32px) clamp(24px, 3.4vw, 42px);
   box-shadow: var(--shadow-xs), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
@@ -648,7 +671,7 @@ input {
 
 .banner h1 {
   margin-bottom: 12px;
-  font-size: 36px;
+  font-size: clamp(28px, 3.2vw, 36px);
   font-weight: 780;
   line-height: 1.15;
 }
@@ -657,8 +680,8 @@ input {
   display: block;
   max-width: 760px;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 16px;
-  line-height: 1.75;
+  font-size: clamp(14px, 1.4vw, 16px);
+  line-height: 1.68;
 }
 
 .banner strong {
@@ -674,7 +697,7 @@ input {
 
 .quickGrid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(112px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
   gap: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
@@ -732,7 +755,7 @@ input {
 
 .dashboardGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.9fr);
   gap: 24px;
 }
 
@@ -742,7 +765,7 @@ input {
 
 .metricGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -759,8 +782,8 @@ input {
 }
 
 .metricCard {
-  min-height: 112px;
-  padding: 24px 22px;
+  min-height: 104px;
+  padding: 22px 20px;
 }
 
 .metricCard span {
@@ -806,6 +829,7 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 18px;
   margin-bottom: 18px;
 }
@@ -911,7 +935,7 @@ input {
 
 .rpaTableHead,
 .rpaTableRow {
-  grid-template-columns: minmax(240px, 1.55fr) 136px 120px 104px 150px 104px 88px;
+  grid-template-columns: minmax(240px, 1.8fr) 136px 120px 132px 156px 104px 88px;
   gap: 16px;
   padding: 13px 16px;
 }
@@ -976,9 +1000,53 @@ input {
     background-size 250ms var(--ease-out);
 }
 
+.assetTitleBar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.assetTitleBar .assetNameLink {
+  margin-bottom: 0;
+}
+
 .assetNameLink:hover {
   color: #174db7;
   background-size: 100% 2px;
+}
+
+.favoriteButton {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted-2);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.favoriteButton:hover {
+  border-color: rgba(31, 157, 122, 0.28);
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+}
+
+.favoriteButton.active {
+  border-color: rgba(31, 157, 122, 0.28);
+  background: var(--brand-soft);
+  color: #c68a00;
+}
+
+.favoriteButton:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .assetTableRow p,
@@ -1045,7 +1113,7 @@ input {
 
 .statsSummary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
 }
 
@@ -1153,7 +1221,7 @@ input {
 }
 
 .statsSummary.expanded {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .statsSummary .metricCard p {
@@ -1166,7 +1234,7 @@ input {
 
 .statsInsightGrid {
   display: grid;
-  grid-template-columns: minmax(380px, 1.35fr) minmax(240px, 0.85fr) minmax(240px, 0.85fr);
+  grid-template-columns: minmax(320px, 1.25fr) repeat(2, minmax(220px, 0.85fr));
   gap: 16px;
 }
 
@@ -1440,23 +1508,35 @@ input {
   background: #fff;
 }
 
+.miniListItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 8px 12px;
+}
+
+.miniListItem:first-child {
+  border-top: 0;
+}
+
 .miniList a {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 92px;
   gap: 10px;
   align-items: center;
   min-height: 44px;
-  border-top: 1px solid var(--line);
-  padding: 9px 12px;
   text-decoration: none;
-}
-
-.miniList a:first-child {
-  border-top: 0;
 }
 
 .miniList a:hover {
   background: var(--surface-soft);
+}
+
+.miniListItem .favoriteButton {
+  width: 28px;
+  height: 28px;
 }
 
 .miniList span {
@@ -1565,7 +1645,7 @@ input {
 
 .adminGrid {
   display: grid;
-  grid-template-columns: minmax(360px, 0.85fr) minmax(520px, 1.15fr);
+  grid-template-columns: minmax(320px, 0.85fr) minmax(420px, 1.15fr);
   gap: 18px;
   align-items: start;
 }
@@ -1842,7 +1922,25 @@ input {
   padding: 0;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1440px) {
+  .appShell:not(.sidebarIsCollapsed) {
+    --sidebar: 232px;
+  }
+
+  .contentShell {
+    padding-inline: 20px;
+  }
+
+  .dashboardGrid {
+    grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.8fr);
+  }
+
+  .statsInsightGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1180px) {
   .dashboardGrid {
     grid-template-columns: 1fr;
   }

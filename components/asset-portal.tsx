@@ -15,7 +15,7 @@ type DirectoryNode = Directory & {
   children: DirectoryNode[];
 };
 
-type ActiveView = "home" | "directory" | "stats" | "admin" | "rpa" | "rpaLogs";
+type ActiveView = "home" | "directory" | "favorites" | "stats" | "admin" | "rpa" | "rpaLogs";
 
 type RpaTask = {
   id: string;
@@ -160,6 +160,26 @@ async function fetchJson<T>(url: string): Promise<T> {
   return payload.data as T;
 }
 
+async function fetchFavoriteAssetIds(): Promise<number[]> {
+  return fetchJson<number[]>("/api/favorites");
+}
+
+async function addFavoriteAsset(assetId: number): Promise<void> {
+  await sendJson<{ ok: true; assetId: number }>("/api/favorites", "POST", { assetId });
+}
+
+async function removeFavoriteAsset(assetId: number): Promise<void> {
+  const response = await fetch(withBasePath(`/api/favorites/${assetId}`), {
+    method: "DELETE",
+    credentials: "include"
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "取消收藏失败");
+  }
+}
+
 async function sendJson<T>(url: string, method: "POST" | "PUT", body: unknown): Promise<T> {
   const response = await fetch(withBasePath(url), {
     method,
@@ -300,6 +320,29 @@ function TypeFilterBar({
   );
 }
 
+function FavoriteToggleButton({
+  active,
+  disabled,
+  onToggle
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      className={active ? "favoriteButton active" : "favoriteButton"}
+      type="button"
+      title={active ? "取消收藏" : "加入收藏"}
+      aria-label={active ? "取消收藏" : "加入收藏"}
+      disabled={disabled}
+      onClick={onToggle}
+    >
+      {active ? "★" : "☆"}
+    </button>
+  );
+}
+
 function AssetListPanel({
   title,
   description,
@@ -308,7 +351,10 @@ function AssetListPanel({
   assets,
   loading,
   error,
-  assetTypeMap
+  assetTypeMap,
+  favoriteAssetIds,
+  favoritePendingIds,
+  onToggleFavorite
 }: {
   title: string;
   description: string;
@@ -318,6 +364,9 @@ function AssetListPanel({
   loading: boolean;
   error: string | null;
   assetTypeMap: Map<string, AssetTypeDefinition>;
+  favoriteAssetIds: Set<number>;
+  favoritePendingIds: Set<number>;
+  onToggleFavorite: (assetId: number) => void;
 }) {
   return (
     <div className="assetTablePanel">
@@ -357,44 +406,52 @@ function AssetListPanel({
 
       {!loading && !error && assets.length === 0 ? (
         <div className="emptyState">
-          <h3>暂无资产</h3>
-          <p>可以在 MySQL 的 assets 表中新增 active 状态的资产链接。</p>
+          <h3>暂无应用</h3>
         </div>
       ) : null}
 
-      <div className="assetTable">
-        <div className="assetTableHead">
-          <span>应用名称</span>
-          <span>类型</span>
-          <span>负责人</span>
-          <span>部门</span>
-          <span>标签</span>
-        </div>
-        {assets.map((asset) => (
-          <div className="assetTableRow" key={asset.id}>
-            <div>
-              <a
-                className="assetNameLink"
-                href={asset.url}
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => recordAssetOpen(asset.id)}
-              >
-                {asset.name}
-              </a>
-              <p>{asset.description || "暂无说明"}</p>
-            </div>
-            <span className={`typePill ${getTypeColorClass(assetTypeMap.get(asset.type)?.color)}`}>
-              {assetTypeMap.get(asset.type)?.name ?? asset.type}
-            </span>
-            <span>{asset.ownerName || "未填写"}</span>
-            <span>{asset.departmentName || "未填写"}</span>
-            <div className="tags">
-              {asset.tags.length > 0 ? asset.tags.map((tag) => <span key={tag}>{tag}</span>) : "无"}
-            </div>
+      {assets.length > 0 ? (
+        <div className="assetTable">
+          <div className="assetTableHead">
+            <span>应用名称</span>
+            <span>类型</span>
+            <span>负责人</span>
+            <span>部门</span>
+            <span>标签</span>
           </div>
-        ))}
-      </div>
+          {assets.map((asset) => (
+            <div className="assetTableRow" key={asset.id}>
+              <div>
+                <div className="assetTitleBar">
+                  <a
+                    className="assetNameLink"
+                    href={asset.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => recordAssetOpen(asset.id)}
+                  >
+                    {asset.name}
+                  </a>
+                  <FavoriteToggleButton
+                    active={favoriteAssetIds.has(asset.id)}
+                    disabled={favoritePendingIds.has(asset.id)}
+                    onToggle={() => onToggleFavorite(asset.id)}
+                  />
+                </div>
+                <p>{asset.description || "暂无说明"}</p>
+              </div>
+              <span className={`typePill ${getTypeColorClass(assetTypeMap.get(asset.type)?.color)}`}>
+                {assetTypeMap.get(asset.type)?.name ?? asset.type}
+              </span>
+              <span>{asset.ownerName || "未填写"}</span>
+              <span>{asset.departmentName || "未填写"}</span>
+              <div className="tags">
+                {asset.tags.length > 0 ? asset.tags.map((tag) => <span key={tag}>{tag}</span>) : "无"}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -402,18 +459,30 @@ function AssetListPanel({
 function RpaTaskPanel({
   tasks,
   departments,
+  statuses,
   selectedDept,
+  keyword,
+  selectedStatus,
   loading,
   error,
+  onKeywordChange,
   onSelectDept,
+  onSelectStatus,
+  onResetFilters,
   onViewLogs
 }: {
   tasks: RpaTask[];
   departments: string[];
+  statuses: string[];
   selectedDept: string | null;
+  keyword: string;
+  selectedStatus: string | null;
   loading: boolean;
   error: string | null;
+  onKeywordChange: (keyword: string) => void;
   onSelectDept: (deptName: string | null) => void;
+  onSelectStatus: (status: string | null) => void;
+  onResetFilters: () => void;
   onViewLogs: (task: RpaTask) => void;
 }) {
   const [startingTaskId, setStartingTaskId] = useState<string | null>(null);
@@ -449,30 +518,44 @@ function RpaTaskPanel({
       <div className="detailHeader">
         <div>
           <h1>{selectedDept ? `实在RPA / ${selectedDept}` : "实在RPA"}</h1>
-          <span>按 rpa_task.dept_name 分组展示 RPA 任务，点击启动程序会调用后端启动接口。</span>
+          <span>按任务名称、部门和状态筛选 RPA 任务，点击启动程序会调用后端启动接口。</span>
         </div>
       </div>
 
-      <section className="quickGrid" aria-label="RPA 部门筛选">
-        <button
-          className={selectedDept === null ? "quickAction active" : "quickAction"}
-          type="button"
-          onClick={() => onSelectDept(null)}
-        >
-          <span>⌂</span>
-          全部任务
+      <section className="statsFilterBar" aria-label="RPA 任务筛选">
+        <label>
+          <span>任务名称</span>
+          <input
+            value={keyword}
+            onChange={(event) => onKeywordChange(event.target.value)}
+            placeholder="输入任务名称搜索"
+          />
+        </label>
+        <label>
+          <span>部门</span>
+          <select value={selectedDept ?? ""} onChange={(event) => onSelectDept(event.target.value || null)}>
+            <option value="">全部部门</option>
+            {departments.map((deptName) => (
+              <option key={deptName} value={deptName}>
+                {deptName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>状态</span>
+          <select value={selectedStatus ?? ""} onChange={(event) => onSelectStatus(event.target.value || null)}>
+            <option value="">全部状态</option>
+            {statuses.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" onClick={onResetFilters} disabled={!keyword && !selectedDept && !selectedStatus}>
+          重置
         </button>
-        {departments.map((deptName) => (
-          <button
-            className={selectedDept === deptName ? "quickAction active" : "quickAction"}
-            key={deptName}
-            type="button"
-            onClick={() => onSelectDept(deptName)}
-          >
-            <span>▣</span>
-            {deptName}
-          </button>
-        ))}
       </section>
 
       <div className="assetTablePanel">
@@ -516,7 +599,6 @@ function RpaTaskPanel({
           <div className="rpaTableHead">
             <span>任务名称</span>
             <span>部门</span>
-            <span>负责人</span>
             <span>需求文档</span>
             <span>状态</span>
             <span>更新时间</span>
@@ -527,10 +609,8 @@ function RpaTaskPanel({
             <div className="rpaTableRow" key={task.id}>
               <div>
                 <strong>{task.name}</strong>
-                <p>{task.description || "暂无说明"}</p>
               </div>
               <span>{task.deptName}</span>
-              <span>{task.ownerName || "未填写"}</span>
               <span>
                 {task.requirementDocUrl ? (
                   <a className="assetNameLink inlineLink" href={task.requirementDocUrl} target="_blank" rel="noreferrer">
@@ -661,12 +741,18 @@ function StatsReport({
   assets,
   loading,
   error,
-  assetTypeMap
+  assetTypeMap,
+  favoriteAssetIds,
+  favoritePendingIds,
+  onToggleFavorite
 }: {
   assets: Asset[];
   loading: boolean;
   error: string | null;
   assetTypeMap: Map<string, AssetTypeDefinition>;
+  favoriteAssetIds: Set<number>;
+  favoritePendingIds: Set<number>;
+  onToggleFavorite: (assetId: number) => void;
 }) {
   const sortedAssets = useMemo(
     () => [...assets].sort((left, right) => right.clickCount - left.clickCount || left.id - right.id),
@@ -746,15 +832,22 @@ function StatsReport({
           {sortedAssets.map((asset) => (
             <div className="statsTableRow" key={asset.id}>
               <div>
-                <a
-                  className="assetNameLink"
-                  href={asset.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => recordAssetOpen(asset.id)}
-                >
-                  {asset.name}
-                </a>
+                <div className="assetTitleBar">
+                  <a
+                    className="assetNameLink"
+                    href={asset.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => recordAssetOpen(asset.id)}
+                  >
+                    {asset.name}
+                  </a>
+                  <FavoriteToggleButton
+                    active={favoriteAssetIds.has(asset.id)}
+                    disabled={favoritePendingIds.has(asset.id)}
+                    onToggle={() => onToggleFavorite(asset.id)}
+                  />
+                </div>
                 <p>{asset.description || "暂无说明"}</p>
               </div>
               <span className={`typePill ${getTypeColorClass(assetTypeMap.get(asset.type)?.color)}`}>
@@ -821,7 +914,10 @@ function EnhancedStatsReport({
   assetTypeMap,
   assetTypes,
   statsType,
-  onStatsTypeChange
+  onStatsTypeChange,
+  favoriteAssetIds,
+  favoritePendingIds,
+  onToggleFavorite
 }: {
   assets: Asset[];
   stats: AssetStats;
@@ -836,6 +932,9 @@ function EnhancedStatsReport({
   assetTypes: AssetTypeDefinition[];
   statsType: string | null;
   onStatsTypeChange: (type: string | null) => void;
+  favoriteAssetIds: Set<number>;
+  favoritePendingIds: Set<number>;
+  onToggleFavorite: (assetId: number) => void;
 }) {
   const hasDateRange = Boolean(startDate || endDate);
   const sortedAssets = useMemo(
@@ -1003,15 +1102,22 @@ function EnhancedStatsReport({
           {sortedAssets.map((asset) => (
             <div className="statsTableRow" key={asset.id}>
               <div>
-                <a
-                  className="assetNameLink"
-                  href={asset.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => recordAssetOpen(asset.id)}
-                >
-                  {asset.name}
-                </a>
+                <div className="assetTitleBar">
+                  <a
+                    className="assetNameLink"
+                    href={asset.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => recordAssetOpen(asset.id)}
+                  >
+                    {asset.name}
+                  </a>
+                  <FavoriteToggleButton
+                    active={favoriteAssetIds.has(asset.id)}
+                    disabled={favoritePendingIds.has(asset.id)}
+                    onToggle={() => onToggleFavorite(asset.id)}
+                  />
+                </div>
                 <p>{asset.description || "暂无说明"}</p>
               </div>
               <span className={`typePill ${getTypeColorClass(assetTypeMap.get(asset.type)?.color)}`}>
@@ -1899,7 +2005,12 @@ export default function AssetPortal() {
   const [selectedDirectoryId, setSelectedDirectoryId] = useState<number | null>(null);
   const [selectedRpaDept, setSelectedRpaDept] = useState<string | null>(null);
   const [selectedRpaLogTask, setSelectedRpaLogTask] = useState<RpaTask | null>(null);
+  const [rpaKeyword, setRpaKeyword] = useState("");
+  const [selectedRpaStatus, setSelectedRpaStatus] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [favoriteAssetIds, setFavoriteAssetIds] = useState<Set<number>>(new Set());
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+  const [favoritePendingIds, setFavoritePendingIds] = useState<Set<number>>(new Set());
   const [collapsedDirectoryIds, setCollapsedDirectoryIds] = useState<Set<number>>(new Set());
   const [rpaCollapsed, setRpaCollapsed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -2013,18 +2124,38 @@ export default function AssetPortal() {
   const assetTypeMap = useMemo(() => {
     return new Map(assetTypes.data.map((assetType) => [assetType.code, assetType]));
   }, [assetTypes.data]);
+  const favoriteAssets = useMemo(() => {
+    return assets.data.filter((asset) => favoriteAssetIds.has(asset.id));
+  }, [assets.data, favoriteAssetIds]);
   const rpaDepartments = useMemo(() => {
     return Array.from(new Set(rpaTasks.data.map((task) => task.deptName))).sort((left, right) =>
       left.localeCompare(right, "zh-Hans-CN")
     );
   }, [rpaTasks.data]);
+  const rpaStatuses = useMemo(() => {
+    return Array.from(
+      new Set(rpaTasks.data.map((task) => task.status?.trim()).filter((status): status is string => Boolean(status)))
+    ).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
+  }, [rpaTasks.data]);
   const filteredRpaTasks = useMemo(() => {
-    if (!selectedRpaDept) {
-      return rpaTasks.data;
-    }
+    const normalizedKeyword = rpaKeyword.trim().toLowerCase();
 
-    return rpaTasks.data.filter((task) => task.deptName === selectedRpaDept);
-  }, [rpaTasks.data, selectedRpaDept]);
+    return rpaTasks.data.filter((task) => {
+      if (selectedRpaDept && task.deptName !== selectedRpaDept) {
+        return false;
+      }
+
+      if (selectedRpaStatus && (task.status ?? "") !== selectedRpaStatus) {
+        return false;
+      }
+
+      if (normalizedKeyword && !task.name.toLowerCase().includes(normalizedKeyword)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [rpaTasks.data, selectedRpaDept, selectedRpaStatus, rpaKeyword]);
   const selectedRpaLogRecords = useMemo(() => {
     if (!selectedRpaLogTask?.taskUuid) {
       return [];
@@ -2032,6 +2163,20 @@ export default function AssetPortal() {
 
     return rpaRunRecords.data.filter((record) => record.taskUuid === selectedRpaLogTask.taskUuid);
   }, [rpaRunRecords.data, selectedRpaLogTask]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setFavoriteAssetIds(new Set());
+      setFavoritesLoaded(true);
+      return;
+    }
+
+    setFavoritesLoaded(false);
+    fetchFavoriteAssetIds()
+      .then((assetIds) => setFavoriteAssetIds(new Set(assetIds)))
+      .catch(() => setFavoriteAssetIds(new Set()))
+      .finally(() => setFavoritesLoaded(true));
+  }, [currentUser?.id]);
 
   function toggleDirectory(directoryId: number) {
     setCollapsedDirectoryIds((current) => {
@@ -2060,11 +2205,22 @@ export default function AssetPortal() {
     setSelectedDirectoryId(null);
   }
 
+  function openFavorites() {
+    setActiveView("favorites");
+    setSelectedDirectoryId(null);
+  }
+
   function openRpa(deptName: string | null = null) {
     setActiveView("rpa");
     setSelectedDirectoryId(null);
     setSelectedRpaDept(deptName);
     setSelectedRpaLogTask(null);
+  }
+
+  function resetRpaFilters() {
+    setRpaKeyword("");
+    setSelectedRpaDept(null);
+    setSelectedRpaStatus(null);
   }
 
   function openRpaLogs(task: RpaTask) {
@@ -2076,6 +2232,49 @@ export default function AssetPortal() {
   function openAdmin() {
     setActiveView("admin");
     setSelectedDirectoryId(null);
+  }
+
+  async function toggleFavoriteAsset(assetId: number) {
+    if (favoritePendingIds.has(assetId)) {
+      return;
+    }
+
+    const wasFavorite = favoriteAssetIds.has(assetId);
+
+    setFavoritePendingIds((current) => new Set(current).add(assetId));
+    setFavoriteAssetIds((current) => {
+      const next = new Set(current);
+      if (wasFavorite) {
+        next.delete(assetId);
+      } else {
+        next.add(assetId);
+      }
+      return next;
+    });
+
+    try {
+      if (wasFavorite) {
+        await removeFavoriteAsset(assetId);
+      } else {
+        await addFavoriteAsset(assetId);
+      }
+    } catch {
+      setFavoriteAssetIds((current) => {
+        const next = new Set(current);
+        if (wasFavorite) {
+          next.add(assetId);
+        } else {
+          next.delete(assetId);
+        }
+        return next;
+      });
+    } finally {
+      setFavoritePendingIds((current) => {
+        const next = new Set(current);
+        next.delete(assetId);
+        return next;
+      });
+    }
   }
 
   function refreshPortalData() {
@@ -2113,7 +2312,7 @@ export default function AssetPortal() {
       <aside className="sidebar">
         <div className="brandRow">
           <div className="brandMark">徽</div>
-          <strong>华徽AI工作台</strong>
+          <strong>华徽智能工作台</strong>
           <button
             className="iconButton"
             type="button"
@@ -2131,6 +2330,15 @@ export default function AssetPortal() {
         >
           <span>⌂</span>
           <strong>工作台</strong>
+        </button>
+
+        <button
+          className={activeView === "favorites" ? "homeNav active" : "homeNav"}
+          type="button"
+          onClick={openFavorites}
+        >
+          <span>★</span>
+          <strong>{`我的收藏${favoriteAssetIds.size > 0 ? ` (${favoriteAssetIds.size})` : ""}`}</strong>
         </button>
 
         <button
@@ -2211,27 +2419,29 @@ export default function AssetPortal() {
       <section className="contentShell">
         <div className="topBar">
           {currentUser ? (
-            <div className="userMenu">
-              <button
-                className="userMenuTrigger"
-                type="button"
-                onClick={() => setUserMenuOpen((value) => !value)}
-                aria-expanded={userMenuOpen}
-              >
-                <span className="userAvatar">人</span>
-                <strong>{currentUser.name}</strong>
-              </button>
-              {userMenuOpen ? (
-                <div className="userMenuDropdown">
-                  <div className="userMenuMeta">
-                    <span>{currentUser.departmentName ?? "未填写部门"}</span>
-                    <span>{currentUser.email ?? "未填写邮箱"}</span>
+            <div className="userMenuBar">
+              <div className="userMenu">
+                <button
+                  className="userMenuTrigger"
+                  type="button"
+                  onClick={() => setUserMenuOpen((value) => !value)}
+                  aria-expanded={userMenuOpen}
+                >
+                  <span className="userAvatar">人</span>
+                  <strong>{currentUser.name}</strong>
+                </button>
+                {userMenuOpen ? (
+                  <div className="userMenuDropdown">
+                    <div className="userMenuMeta">
+                      <span>{currentUser.departmentName ?? "未填写部门"}</span>
+                      <span>{currentUser.email ?? "未填写邮箱"}</span>
+                    </div>
                   </div>
-                  <button type="button" onClick={logout}>
-                    退出登录
-                  </button>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
+              <button className="topLogoutButton" type="button" onClick={logout}>
+                退出登录
+              </button>
             </div>
           ) : null}
         </div>
@@ -2248,10 +2458,16 @@ export default function AssetPortal() {
           <RpaTaskPanel
             tasks={filteredRpaTasks}
             departments={rpaDepartments}
+            statuses={rpaStatuses}
             selectedDept={selectedRpaDept}
+            keyword={rpaKeyword}
+            selectedStatus={selectedRpaStatus}
             loading={rpaTasks.loading}
             error={rpaTasks.error}
+            onKeywordChange={setRpaKeyword}
             onSelectDept={setSelectedRpaDept}
+            onSelectStatus={setSelectedRpaStatus}
+            onResetFilters={resetRpaFilters}
             onViewLogs={openRpaLogs}
           />
         ) : activeView === "admin" && currentUser?.isAdmin ? (
@@ -2271,12 +2487,44 @@ export default function AssetPortal() {
             assetTypes={assetTypes.data}
             statsType={statsType}
             onStatsTypeChange={setStatsType}
+            favoriteAssetIds={favoriteAssetIds}
+            favoritePendingIds={favoritePendingIds}
+            onToggleFavorite={toggleFavoriteAsset}
           />
+        ) : activeView === "favorites" ? (
+          <>
+            <section className="detailHeader">
+              <div>
+                <h1>我的收藏</h1>
+                <span>这里展示当前登录用户收藏的应用入口。</span>
+              </div>
+            </section>
+
+            <TypeFilterBar
+              assetTypes={assetTypes.data}
+              selectedType={selectedType}
+              onSelectType={setSelectedType}
+            />
+
+            <AssetListPanel
+              title="收藏应用"
+              description="仅显示你已收藏的应用"
+              keyword={keyword}
+              onKeywordChange={setKeyword}
+              assets={favoriteAssets}
+              loading={assets.loading && !favoritesLoaded}
+              error={assets.error}
+              assetTypeMap={assetTypeMap}
+              favoriteAssetIds={favoriteAssetIds}
+              favoritePendingIds={favoritePendingIds}
+              onToggleFavorite={toggleFavoriteAsset}
+            />
+          </>
         ) : selectedDirectoryId === null ? (
           <>
             <section className="banner">
               <div>
-                <h1>华徽AI工作台</h1>
+                <h1>华徽智能工作台</h1>
                 <span>
                   统一汇总飞书多维表与智能体等应用入口，让团队成员快速找到业务系统、流程和资料。
                 </span>
@@ -2318,6 +2566,9 @@ export default function AssetPortal() {
                   loading={assets.loading}
                   error={assets.error}
                   assetTypeMap={assetTypeMap}
+                  favoriteAssetIds={favoriteAssetIds}
+                  favoritePendingIds={favoritePendingIds}
+                  onToggleFavorite={toggleFavoriteAsset}
                 />
               </section>
 
@@ -2328,17 +2579,11 @@ export default function AssetPortal() {
                     <strong>{stats.data.directoryCount || directories.data.length}</strong>
                     <strong>{stats.data.assetCount || assets.data.length}</strong>
                     <strong>{assetTypes.data.length}</strong>
-                    {stats.data.typeStats.slice(0, 1).map((typeStat) => (
-                      <strong key={typeStat.code}>{typeStat.count}</strong>
-                    ))}
                   </div>
                   <div className="countdownLabels">
                     <span>目录</span>
                     <span>应用</span>
                     <span>类型</span>
-                    {stats.data.typeStats.slice(0, 1).map((typeStat) => (
-                      <span key={typeStat.code}>{typeStat.name}</span>
-                    ))}
                   </div>
                 </div>
 
@@ -2349,17 +2594,23 @@ export default function AssetPortal() {
                   </div>
                   <div className="miniList">
                     {assets.data.slice(0, 6).map((asset, index) => (
-                      <a
-                        href={asset.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        key={asset.id}
-                        onClick={() => recordAssetOpen(asset.id)}
-                      >
-                        <span>{index + 1}</span>
-                        <strong>{asset.name}</strong>
-                        <em>{assetTypeMap.get(asset.type)?.name ?? asset.type}</em>
-                      </a>
+                      <div className="miniListItem" key={asset.id}>
+                        <a
+                          href={asset.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => recordAssetOpen(asset.id)}
+                        >
+                          <span>{index + 1}</span>
+                          <strong>{asset.name}</strong>
+                          <em>{assetTypeMap.get(asset.type)?.name ?? asset.type}</em>
+                        </a>
+                        <FavoriteToggleButton
+                          active={favoriteAssetIds.has(asset.id)}
+                          disabled={favoritePendingIds.has(asset.id)}
+                          onToggle={() => toggleFavoriteAsset(asset.id)}
+                        />
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -2383,13 +2634,16 @@ export default function AssetPortal() {
 
             <AssetListPanel
               title="应用入口"
-              description="按资产类型筛选并打开对应应用"
+              description={`当前目录及子目录下共 ${assets.data.length} 个应用`}
               keyword={keyword}
               onKeywordChange={setKeyword}
               assets={assets.data}
               loading={assets.loading}
               error={assets.error}
               assetTypeMap={assetTypeMap}
+              favoriteAssetIds={favoriteAssetIds}
+              favoritePendingIds={favoritePendingIds}
+              onToggleFavorite={toggleFavoriteAsset}
             />
           </section>
         )}

@@ -62,7 +62,7 @@ export default function LoginPage() {
         <div className="loginBrand">
           <div className="brandMark">徽</div>
           <div>
-            <h1>华徽AI工作台</h1>
+            <h1>华徽智能工作台</h1>
             <p>使用系统邮箱登录，或通过飞书单点登录进入。</p>
           </div>
         </div>

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "华徽AI工作台",
+  title: "华徽智能工作台",
   description: "飞书多维表与 Dify 工作流统一入口"
 };
 
