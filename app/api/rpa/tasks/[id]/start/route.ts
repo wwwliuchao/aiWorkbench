@@ -5,7 +5,6 @@ import { getRpaTask } from "@/lib/rpa";
 export const dynamic = "force-dynamic";
 
 const rpaOperationUrl = "https://z-commander-api.ai-indeed.com/openAPI/v2/job/operation";
-const restcloudNotifyUrl = "http://10.20.0.231:8080/restcloud/ods/etl_flow_3392903036";
 const restcloudAppKey = "5eecbdfe8dcb0814749d9edc";
 const minRpaTriggerIntervalMs = 30_000;
 const rpaTaskLastTriggeredAt = new Map<string, number>();
@@ -34,6 +33,11 @@ function parseJsonSafe(rawText: string) {
 }
 
 async function notifyRestcloudLater(taskId: string, taskUuid: string) {
+  const restcloudNotifyUrl = process.env.RPA_RESTCLOUD_NOTIFY_URL;
+  if (!restcloudNotifyUrl) {
+    throw new Error("Missing RPA_RESTCLOUD_NOTIFY_URL");
+  }
+
   const notifyUrl = new URL(restcloudNotifyUrl);
   notifyUrl.searchParams.set("appkey", restcloudAppKey);
 
