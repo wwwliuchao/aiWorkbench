@@ -93,6 +93,7 @@ type AssetFormState = {
   ownerName: string;
   departmentName: string;
   url: string;
+  openMode: Asset["openMode"];
   tags: string;
   sortOrder: string;
   status: AdminStatus;
@@ -158,6 +159,10 @@ function getTypeIcon(icon?: string | null) {
   };
 
   return icon ? iconMap[icon] ?? icon : "◇";
+}
+
+function getAssetLinkProps(openMode: Asset["openMode"]) {
+  return openMode === "new_tab" ? { target: "_blank", rel: "noreferrer" as const } : {};
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -243,6 +248,19 @@ function buildDirectoryTree(directories: Directory[]): DirectoryNode[] {
 
   sortNodes(roots);
   return roots;
+}
+
+function collectCollapsibleDirectoryIds(nodes: DirectoryNode[]): number[] {
+  const ids: number[] = [];
+
+  nodes.forEach((node) => {
+    if (node.children.length > 0) {
+      ids.push(node.id);
+      ids.push(...collectCollapsibleDirectoryIds(node.children));
+    }
+  });
+
+  return ids;
 }
 
 function DirectoryTreeItem({
@@ -499,8 +517,7 @@ function AssetListPanel({
                   <a
                     className="assetNameLink"
                     href={asset.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    {...getAssetLinkProps(asset.openMode)}
                     onClick={() => recordAssetOpen(asset.id)}
                   >
                     {asset.name}
@@ -976,8 +993,7 @@ function StatsReport({
                   <a
                     className="assetNameLink"
                     href={asset.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    {...getAssetLinkProps(asset.openMode)}
                     onClick={() => recordAssetOpen(asset.id)}
                   >
                     {asset.name}
@@ -1246,8 +1262,7 @@ function EnhancedStatsReport({
                   <a
                     className="assetNameLink"
                     href={asset.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    {...getAssetLinkProps(asset.openMode)}
                     onClick={() => recordAssetOpen(asset.id)}
                   >
                     {asset.name}
@@ -1302,6 +1317,7 @@ const emptyAssetForm: AssetFormState = {
   ownerName: "",
   departmentName: "",
   url: "",
+  openMode: "new_tab",
   tags: "",
   sortOrder: "0",
   status: "active"
@@ -1506,6 +1522,7 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
       ownerName: asset.ownerName ?? "",
       departmentName: asset.departmentName ?? "",
       url: asset.url,
+      openMode: asset.openMode,
       tags: asset.tags.join(", "),
       sortOrder: String(asset.sortOrder),
       status: asset.status
@@ -1717,6 +1734,16 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
                 应用链接
                 <input value={assetForm.url} onChange={(event) => setAssetForm({ ...assetForm, url: event.target.value })} />
               </label>
+              <label>
+                打开方式
+                <select
+                  value={assetForm.openMode}
+                  onChange={(event) => setAssetForm({ ...assetForm, openMode: event.target.value as Asset["openMode"] })}
+                >
+                  <option value="current_tab">当前页打开</option>
+                  <option value="new_tab">新标签页打开</option>
+                </select>
+              </label>
               <label className="wideField">
                 说明
                 <textarea
@@ -1744,7 +1771,8 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
                   <strong>{asset.name}</strong>
                   <p>
                     {directoryNameMap.get(asset.directoryId) ?? "未找到目录"} · {typeNameMap.get(asset.type) ?? asset.type} ·{" "}
-                    {asset.ownerName || "未填负责人"} · {asset.departmentName || "未填部门"}
+                    {asset.ownerName || "未填负责人"} · {asset.departmentName || "未填部门"} ·{" "}
+                    {asset.openMode === "new_tab" ? "新标签页打开" : "当前页打开"}
                   </p>
                   <div className="tagLine">
                     {asset.tags.map((tag) => (
@@ -2300,6 +2328,20 @@ export default function AssetPortal() {
   const selectedRpaLogRecords = rpaRunRecords.data;
 
   useEffect(() => {
+    if (directories.loading || directories.error || directoryTree.length === 0) {
+      return;
+    }
+
+    setCollapsedDirectoryIds((current) => {
+      if (current.size > 0) {
+        return current;
+      }
+
+      return new Set(collectCollapsibleDirectoryIds(directoryTree));
+    });
+  }, [directories.loading, directories.error, directoryTree]);
+
+  useEffect(() => {
     setRpaTaskPage(1);
   }, [selectedRpaDept, selectedRpaStatus, rpaKeyword]);
 
@@ -2784,8 +2826,7 @@ export default function AssetPortal() {
                       <div className="miniListItem" key={asset.id}>
                         <a
                           href={asset.url}
-                          target="_blank"
-                          rel="noreferrer"
+                          {...getAssetLinkProps(asset.openMode)}
                           onClick={() => recordAssetOpen(asset.id)}
                         >
                           <span>{index + 1}</span>

@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 export type AdminStatus = "active" | "inactive";
+export type AssetOpenMode = "current_tab" | "new_tab";
 
 /**
  * 检查当前用户是否为管理员。
@@ -52,6 +53,7 @@ export type AdminAsset = {
   ownerName: string | null;
   departmentName: string | null;
   url: string;
+  openMode: AssetOpenMode;
   tags: string[];
   clickCount: number;
   sortOrder: number;
@@ -103,6 +105,7 @@ type AssetRow = RowDataPacket & {
   owner_name: string | null;
   department_name: string | null;
   url: string;
+  open_mode: AssetOpenMode;
   tags: string | string[] | null;
   click_count: number;
   sort_order: number;
@@ -156,6 +159,10 @@ function cleanCode(value: unknown) {
     .replace(/^_+|_+$/g, "");
 }
 
+function cleanAssetOpenMode(value: unknown): AssetOpenMode {
+  return value === "current_tab" ? "current_tab" : "new_tab";
+}
+
 function valueToString(value: unknown) {
   if (value === null || value === undefined) {
     return null;
@@ -186,6 +193,11 @@ async function getTableColumns(tableName: string) {
   );
 
   return rows.map((row) => row.column_name);
+}
+
+async function assetsHaveOpenMode() {
+  const columns = await getTableColumns("assets");
+  return columns.includes("open_mode");
 }
 
 function pickColumn(columns: string[], candidates: string[]) {
@@ -273,6 +285,7 @@ function mapAsset(row: AssetRow): AdminAsset {
     ownerName: row.owner_name,
     departmentName: row.department_name,
     url: row.url,
+    openMode: row.open_mode ?? "new_tab",
     tags: parseTags(row.tags),
     clickCount: Number(row.click_count ?? 0),
     sortOrder: row.sort_order,
@@ -416,8 +429,11 @@ export async function updateAdminAssetType(code: string, input: unknown): Promis
 }
 
 export async function listAdminAssets(): Promise<AdminAsset[]> {
+  const hasOpenMode = await assetsHaveOpenMode();
+  const openModeSelect = hasOpenMode ? "open_mode" : "'new_tab' AS open_mode";
   const [rows] = await getPool().query<AssetRow[]>(
     `SELECT id, directory_id, type, name, description, owner_name, department_name, url,
+            ${openModeSelect},
             tags, click_count, sort_order, status, created_at, updated_at
      FROM assets
      ORDER BY status ASC, sort_order ASC, id DESC`
@@ -428,10 +444,14 @@ export async function listAdminAssets(): Promise<AdminAsset[]> {
 
 export async function createAdminAsset(input: unknown): Promise<number> {
   const body = input as Record<string, unknown>;
+  if (!(await assetsHaveOpenMode())) {
+    throw new Error("缺少 assets.open_mode 字段，请先执行 db/migrate_asset_open_mode.sql");
+  }
   const directoryId = cleanId(body.directoryId);
   const type = cleanText(body.type, 50);
   const name = cleanText(body.name, 160);
   const url = cleanText(body.url, 1000);
+  const openMode = cleanAssetOpenMode(body.openMode);
 
   if (!directoryId) {
     throw new Error("请选择目录");
@@ -447,14 +467,14 @@ export async function createAdminAsset(input: unknown): Promise<number> {
   }
 
   const [result] = await getPool().execute<ResultSetHeader>(
-    `INSERT INTO assets (
-        directory_id, type, name, description, owner_name, department_name,
-        url, tags, sort_order, status
-     )
-     VALUES (
-        :directoryId, :type, :name, :description, :ownerName, :departmentName,
-        :url, :tags, :sortOrder, :status
-     )`,
+     `INSERT INTO assets (
+         directory_id, type, name, description, owner_name, department_name,
+         url, open_mode, tags, sort_order, status
+      )
+      VALUES (
+         :directoryId, :type, :name, :description, :ownerName, :departmentName,
+         :url, :openMode, :tags, :sortOrder, :status
+      )`,
     {
       directoryId,
       type,
@@ -463,6 +483,7 @@ export async function createAdminAsset(input: unknown): Promise<number> {
       ownerName: cleanNullableText(body.ownerName, 80),
       departmentName: cleanNullableText(body.departmentName, 120),
       url,
+      openMode,
       tags: JSON.stringify(cleanTags(body.tags)),
       sortOrder: cleanNumber(body.sortOrder),
       status: cleanStatus(body.status)
@@ -474,10 +495,14 @@ export async function createAdminAsset(input: unknown): Promise<number> {
 
 export async function updateAdminAsset(id: number, input: unknown): Promise<void> {
   const body = input as Record<string, unknown>;
+  if (!(await assetsHaveOpenMode())) {
+    throw new Error("缺少 assets.open_mode 字段，请先执行 db/migrate_asset_open_mode.sql");
+  }
   const directoryId = cleanId(body.directoryId);
   const type = cleanText(body.type, 50);
   const name = cleanText(body.name, 160);
   const url = cleanText(body.url, 1000);
+  const openMode = cleanAssetOpenMode(body.openMode);
 
   if (!directoryId) {
     throw new Error("请选择目录");
@@ -501,6 +526,7 @@ export async function updateAdminAsset(id: number, input: unknown): Promise<void
          owner_name = :ownerName,
          department_name = :departmentName,
          url = :url,
+         open_mode = :openMode,
          tags = :tags,
          sort_order = :sortOrder,
          status = :status
@@ -514,6 +540,7 @@ export async function updateAdminAsset(id: number, input: unknown): Promise<void
       ownerName: cleanNullableText(body.ownerName, 80),
       departmentName: cleanNullableText(body.departmentName, 120),
       url,
+      openMode,
       tags: JSON.stringify(cleanTags(body.tags)),
       sortOrder: cleanNumber(body.sortOrder),
       status: cleanStatus(body.status)

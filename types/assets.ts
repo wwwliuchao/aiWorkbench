@@ -1,4 +1,5 @@
 export type AssetType = string;
+export type AssetOpenMode = "current_tab" | "new_tab";
 
 export type AssetTypeDefinition = {
   code: string;
@@ -71,6 +72,7 @@ export type Asset = {
   ownerName: string | null;
   departmentName: string | null;
   url: string;
+  openMode: AssetOpenMode;
   tags: string[];
   clickCount: number;
   sortOrder: number;

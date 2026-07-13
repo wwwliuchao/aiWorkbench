@@ -22,6 +22,7 @@ type AssetRow = RowDataPacket & {
   owner_name: string | null;
   department_name: string | null;
   url: string;
+  open_mode: Asset["openMode"];
   tags: string | string[] | null;
   click_count: number;
   sort_order: number;
@@ -113,6 +114,10 @@ async function assetsHaveDepartmentName(): Promise<boolean> {
   return tableHasColumn("assets", "department_name");
 }
 
+async function assetsHaveOpenMode(): Promise<boolean> {
+  return tableHasColumn("assets", "open_mode");
+}
+
 async function assetVisitLogsExist(): Promise<boolean> {
   return tableExists("asset_visit_logs");
 }
@@ -172,8 +177,10 @@ export async function listAssets(options: {
   const hasParentId = await directoriesHaveParentId();
   const hasClickCount = await assetsHaveClickCount();
   const hasDepartmentName = await assetsHaveDepartmentName();
+  const hasOpenMode = await assetsHaveOpenMode();
   const clickCountSelect = hasClickCount ? "a.click_count" : "0 AS click_count";
   const departmentNameSelect = hasDepartmentName ? "a.department_name" : "NULL AS department_name";
+  const openModeSelect = hasOpenMode ? "a.open_mode" : "'new_tab' AS open_mode";
   const params: Record<string, string | number> = {};
   const filters = ["a.status = 'active'", "d.status = 'active'"];
 
@@ -214,13 +221,14 @@ export async function listAssets(options: {
        a.directory_id,
        a.type,
        a.name,
-       a.description,
-       a.owner_name,
-       ${departmentNameSelect},
-       a.url,
-       CAST(a.tags AS CHAR) AS tags,
-       ${clickCountSelect},
-       a.sort_order,
+        a.description,
+        a.owner_name,
+        ${departmentNameSelect},
+        a.url,
+        ${openModeSelect},
+        CAST(a.tags AS CHAR) AS tags,
+        ${clickCountSelect},
+        a.sort_order,
        a.created_at,
        a.updated_at
      FROM assets a
@@ -236,11 +244,12 @@ export async function listAssets(options: {
     type: row.type,
     name: row.name,
     description: row.description,
-    ownerName: row.owner_name,
-    departmentName: row.department_name,
-    url: row.url,
-    tags: parseTags(row.tags),
-    clickCount: Number(row.click_count ?? 0),
+      ownerName: row.owner_name,
+      departmentName: row.department_name,
+      url: row.url,
+      openMode: row.open_mode ?? "new_tab",
+      tags: parseTags(row.tags),
+      clickCount: Number(row.click_count ?? 0),
     sortOrder: row.sort_order,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)

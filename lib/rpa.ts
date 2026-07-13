@@ -203,7 +203,7 @@ export async function listRpaRunRecords(options: {
     ? `ORDER BY ${escapeIdentifier(startedAtColumn)} DESC`
     : `ORDER BY ${escapeIdentifier(idColumn)} DESC`;
   const where = options.taskUuid ? `WHERE ${escapeIdentifier(taskUuidColumn)} = :taskUuid` : "";
-  const params = options.taskUuid ? { taskUuid: options.taskUuid } : {};
+  const params = options.taskUuid ? { taskUuid: options.taskUuid } : undefined;
   const [countRows] = await getPool().execute<RowDataPacket[]>(
     `SELECT COUNT(*) AS total FROM rpa_run_record ${where}`,
     params

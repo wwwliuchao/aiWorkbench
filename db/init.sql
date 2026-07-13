@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS assets (
   owner_name VARCHAR(80) NULL,
   department_name VARCHAR(120) NULL,
   url VARCHAR(1000) NOT NULL,
+  open_mode VARCHAR(20) NOT NULL DEFAULT 'new_tab',
   tags JSON NOT NULL,
   click_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
   sort_order INT NOT NULL DEFAULT 0,
@@ -66,7 +67,8 @@ CREATE TABLE IF NOT EXISTS assets (
     FOREIGN KEY (type) REFERENCES asset_types (code)
     ON DELETE RESTRICT
     ON UPDATE CASCADE,
-  CONSTRAINT chk_assets_status CHECK (status IN ('active', 'inactive'))
+  CONSTRAINT chk_assets_status CHECK (status IN ('active', 'inactive')),
+  CONSTRAINT chk_assets_open_mode CHECK (open_mode IN ('current_tab', 'new_tab'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS asset_visit_logs (
