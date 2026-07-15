@@ -1832,6 +1832,17 @@ input {
   border-top: 1px solid rgba(19, 56, 46, 0.08);
 }
 
+.listOverflowHint {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(19, 56, 46, 0.08);
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-align: center;
+}
+
 .paginationMeta {
   margin: 0;
   color: var(--muted);

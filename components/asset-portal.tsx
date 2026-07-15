@@ -406,7 +406,7 @@ function PaginationControls({
           <button className="paginationButton" type="button" onClick={onPrevPage} disabled={loading}>
             上一页
           </button>
-        ) : null}
+      ) : null}
         {!isLastPage ? (
           <button className="paginationButton" type="button" onClick={onNextPage} disabled={loading}>
             下一页
@@ -428,7 +428,8 @@ function AssetListPanel({
   assetTypeMap,
   favoriteAssetIds,
   favoritePendingIds,
-  onToggleFavorite
+  onToggleFavorite,
+  maxVisibleItems
 }: {
   title: string;
   description: string;
@@ -441,6 +442,7 @@ function AssetListPanel({
   favoriteAssetIds: Set<number>;
   favoritePendingIds: Set<number>;
   onToggleFavorite: (assetId: number) => void;
+  maxVisibleItems?: number;
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(assets.length / assetListPageSize));
@@ -448,6 +450,8 @@ function AssetListPanel({
     const offset = (currentPage - 1) * assetListPageSize;
     return assets.slice(offset, offset + assetListPageSize);
   }, [assets, currentPage]);
+  const visibleAssets = maxVisibleItems ? assets.slice(0, maxVisibleItems) : paginatedAssets;
+  const hasHiddenAssets = maxVisibleItems ? assets.length > maxVisibleItems : false;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -510,7 +514,7 @@ function AssetListPanel({
             <span>部门</span>
             <span>标签</span>
           </div>
-          {paginatedAssets.map((asset) => (
+          {visibleAssets.map((asset) => (
             <div className="assetTableRow" key={asset.id}>
               <div>
                 <div className="assetTitleBar">
@@ -541,17 +545,21 @@ function AssetListPanel({
             </div>
           ))}
         </div>
-      ) : null}
+        ) : null}
 
-      <PaginationControls
-        currentPage={currentPage}
-        totalPages={totalPages}
-        totalItems={assets.length}
-        pageSize={assetListPageSize}
-        loading={loading}
-        onPrevPage={() => setCurrentPage((page) => Math.max(1, page - 1))}
-        onNextPage={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-      />
+      {hasHiddenAssets ? <div className="listOverflowHint" aria-label="还有更多应用">...</div> : null}
+
+      {!maxVisibleItems ? (
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={assets.length}
+          pageSize={assetListPageSize}
+          loading={loading}
+          onPrevPage={() => setCurrentPage((page) => Math.max(1, page - 1))}
+          onNextPage={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+        />
+      ) : null}
     </div>
   );
 }
@@ -986,7 +994,7 @@ function StatsReport({
             <span>部门</span>
             <span>访问数</span>
           </div>
-          {sortedAssets.map((asset) => (
+          {sortedAssets.slice(0, 10).map((asset) => (
             <div className="statsTableRow" key={asset.id}>
               <div>
                 <div className="assetTitleBar">
@@ -1015,6 +1023,7 @@ function StatsReport({
             </div>
           ))}
         </div>
+        {sortedAssets.length > 10 ? <div className="listOverflowHint" aria-label="还有更多应用">...</div> : null}
       </div>
     </section>
   );
@@ -1116,6 +1125,7 @@ function EnhancedStatsReport({
       : topAsset.clickCount
     : 0;
   const maxDailyClickCount = Math.max(...stats.dailyStats.map((item) => item.clickCount), 1);
+  const rankedAssets = sortedAssets.slice(0, 10);
 
   return (
     <section className="statsReport">
@@ -1255,7 +1265,7 @@ function EnhancedStatsReport({
             <span>部门</span>
             <span>访问数</span>
           </div>
-          {sortedAssets.map((asset) => (
+          {rankedAssets.map((asset) => (
             <div className="statsTableRow" key={asset.id}>
               <div>
                 <div className="assetTitleBar">
@@ -1286,6 +1296,7 @@ function EnhancedStatsReport({
             </div>
           ))}
         </div>
+        {sortedAssets.length > 10 ? <div className="listOverflowHint" aria-label="还有更多应用">...</div> : null}
       </div>
     </section>
   );
@@ -2792,6 +2803,7 @@ export default function AssetPortal() {
                   keyword={keyword}
                   onKeywordChange={setKeyword}
                   assets={assets.data}
+                  maxVisibleItems={10}
                   loading={assets.loading}
                   error={assets.error}
                   assetTypeMap={assetTypeMap}
