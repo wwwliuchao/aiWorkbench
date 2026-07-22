@@ -2193,7 +2193,7 @@ export default function AssetPortal() {
   const [favoritesLoaded, setFavoritesLoaded] = useState(false);
   const [favoritePendingIds, setFavoritePendingIds] = useState<Set<number>>(new Set());
   const [collapsedDirectoryIds, setCollapsedDirectoryIds] = useState<Set<number>>(new Set());
-  const [rpaCollapsed, setRpaCollapsed] = useState(false);
+  const [rpaCollapsed, setRpaCollapsed] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [keyword, setKeyword] = useState("");
