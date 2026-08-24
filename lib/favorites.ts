@@ -29,7 +29,7 @@ async function ensureFavoritesTable() {
   }
 }
 
-export async function listFavoriteAssetIds(userId: number): Promise<number[]> {
+export async function listFavoriteAssetIds(userWorkcode: string): Promise<number[]> {
   await ensureFavoritesTable();
 
   const [rows] = await getPool().execute<FavoriteRow[]>(
@@ -37,27 +37,27 @@ export async function listFavoriteAssetIds(userId: number): Promise<number[]> {
      FROM asset_favorites af
      INNER JOIN assets a ON a.id = af.asset_id AND a.status = 'active'
      INNER JOIN directories d ON d.id = a.directory_id AND d.status = 'active'
-     WHERE af.user_id = :userId
+     WHERE af.user_workcode = :userWorkcode
      ORDER BY af.created_at DESC, af.id DESC`,
-    { userId }
+    { userWorkcode }
   );
 
   return rows.map((row) => Number(row.asset_id));
 }
 
-export async function addFavoriteAsset(userId: number, assetId: number): Promise<void> {
+export async function addFavoriteAsset(userWorkcode: string, assetId: number): Promise<void> {
   await ensureFavoritesTable();
 
   const [result] = await getPool().execute<ResultSetHeader>(
-    `INSERT INTO asset_favorites (user_id, asset_id)
-     SELECT :userId, a.id
+    `INSERT INTO asset_favorites (user_workcode, asset_id)
+     SELECT :userWorkcode, a.id
      FROM assets a
      INNER JOIN directories d ON d.id = a.directory_id
      WHERE a.id = :assetId
        AND a.status = 'active'
        AND d.status = 'active'
      ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP`,
-    { userId, assetId }
+    { userWorkcode, assetId }
   );
 
   if (result.affectedRows === 0) {
@@ -65,12 +65,12 @@ export async function addFavoriteAsset(userId: number, assetId: number): Promise
   }
 }
 
-export async function removeFavoriteAsset(userId: number, assetId: number): Promise<void> {
+export async function removeFavoriteAsset(userWorkcode: string, assetId: number): Promise<void> {
   await ensureFavoritesTable();
 
   await getPool().execute(
     `DELETE FROM asset_favorites
-     WHERE user_id = :userId AND asset_id = :assetId`,
-    { userId, assetId }
+     WHERE user_workcode = :userWorkcode AND asset_id = :assetId`,
+    { userWorkcode, assetId }
   );
 }

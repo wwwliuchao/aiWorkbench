@@ -10,6 +10,18 @@
 - MySQL
 - mysql2
 
+## EIP 用户和部门引用
+
+- 登录用户直接读取 `eip.sys_user`，不使用 `asset_portal.sys_user`。
+- 部门直接读取 `eip.departmentinfo`。
+- 用户唯一标识统一使用 `eip.sys_user.workcode`；没有工号的用户不会进入可选用户列表，也不能登录。
+- 应用负责人只保存 `assets.owner_workcode`。
+- 应用负责部门只保存 `asset_departments.department_id`。
+- 收藏和访问记录保存 `user_workcode`，部门保存 `department_id`，名称在查询时从 EIP 解析。
+- `asset_portal_user` 需要拥有 `eip.sys_user`、`eip.departmentinfo` 的 `SELECT` 权限。
+- 现有数据库升级执行：`node scripts/migrate-eip-references.cjs`。
+- 工号引用升级执行：`node scripts/migrate-user-workcode-references.cjs`。
+
 ## 本地启动
 
 1. 安装依赖：

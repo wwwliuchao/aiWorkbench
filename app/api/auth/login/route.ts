@@ -23,9 +23,10 @@ export async function POST(request: Request) {
     data: {
       ok: true,
       user: {
-        id: user.userId,
+        id: user.workcode!,
         name: getDisplayName(user),
         email: user.email,
+        departmentId: user.departmentId,
         departmentName: user.departmentName,
         provider: "password",
         isAdmin: user.isManager === 1
@@ -36,9 +37,10 @@ export async function POST(request: Request) {
   setSessionCookie(
     response,
     {
-      id: user.userId,
+      id: user.workcode!,
       name: getDisplayName(user),
       email: user.email,
+      departmentId: user.departmentId,
       departmentName: user.departmentName,
       provider: "password",
       isAdmin: user.isManager === 1

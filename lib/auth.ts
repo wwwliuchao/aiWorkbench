@@ -4,9 +4,10 @@ import type { NextResponse } from "next/server";
 export const authCookieName = "asset_portal_session";
 
 export type SessionUser = {
-  id: number;
+  id: string;
   name: string;
   email: string | null;
+  departmentId: string | null;
   departmentName: string | null;
   provider: "password" | "feishu";
   isAdmin: boolean;
@@ -22,7 +23,8 @@ export function decodeSession(value?: string): SessionUser | null {
   }
 
   try {
-    return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as SessionUser;
+    const user = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as SessionUser;
+    return typeof user.id === "string" && user.id.trim() ? user : null;
   } catch {
     return null;
   }

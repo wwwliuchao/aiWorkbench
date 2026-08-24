@@ -2,6 +2,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getPool } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { getEipDepartmentsByIds, getEipUsersByWorkcodes, validateEipReferences } from "@/lib/eip";
 
 export type AdminStatus = "active" | "inactive";
 export type AssetOpenMode = "current_tab" | "new_tab";
@@ -50,7 +51,9 @@ export type AdminAsset = {
   type: string;
   name: string;
   description: string | null;
+  ownerWorkcode: string | null;
   ownerName: string | null;
+  departmentIds: string[];
   departmentName: string | null;
   url: string;
   openMode: AssetOpenMode;
@@ -70,6 +73,7 @@ export type AdminRpaTask = {
   ownerName: string | null;
   status: string | null;
   requirementDocUrl: string | null;
+  relatedMaterialUrl: string | null;
   updatedAt: string | null;
 };
 
@@ -102,8 +106,7 @@ type AssetRow = RowDataPacket & {
   type: string;
   name: string;
   description: string | null;
-  owner_name: string | null;
-  department_name: string | null;
+  owner_workcode: string | null;
   url: string;
   open_mode: AssetOpenMode;
   tags: string | string[] | null;
@@ -112,6 +115,11 @@ type AssetRow = RowDataPacket & {
   status: AdminStatus;
   created_at: Date;
   updated_at: Date;
+};
+
+type AssetDepartmentRow = RowDataPacket & {
+  asset_id: number;
+  department_id: string;
 };
 
 type ColumnRow = RowDataPacket & {
@@ -228,6 +236,19 @@ function cleanTags(value: unknown) {
     .slice(0, 20);
 }
 
+function cleanResponsibleDepartments(value: unknown) {
+  const source = Array.isArray(value) ? value.map(String) : typeof value === "string" ? value.split(/[,，]/) : [];
+  const departments = Array.from(
+    new Set(source.map((department) => cleanText(department, 60)).filter(Boolean))
+  );
+  return cleanNullableText(departments.join(","), 120);
+}
+
+function cleanDepartmentIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((id) => cleanText(id, 128)).filter(Boolean))).slice(0, 50);
+}
+
 function parseTags(value: AssetRow["tags"]) {
   if (!value) {
     return [];
@@ -275,15 +296,22 @@ function mapAssetType(row: AssetTypeRow): AdminAssetType {
   };
 }
 
-function mapAsset(row: AssetRow): AdminAsset {
+function mapAsset(
+  row: AssetRow,
+  ownerName: string | null,
+  departmentIds: string[],
+  departmentNames: string[]
+): AdminAsset {
   return {
     id: row.id,
     directoryId: row.directory_id,
     type: row.type,
     name: row.name,
     description: row.description,
-    ownerName: row.owner_name,
-    departmentName: row.department_name,
+    ownerWorkcode: row.owner_workcode || null,
+    ownerName,
+    departmentIds,
+    departmentName: departmentNames.join(",") || null,
     url: row.url,
     openMode: row.open_mode ?? "new_tab",
     tags: parseTags(row.tags),
@@ -432,14 +460,35 @@ export async function listAdminAssets(): Promise<AdminAsset[]> {
   const hasOpenMode = await assetsHaveOpenMode();
   const openModeSelect = hasOpenMode ? "open_mode" : "'new_tab' AS open_mode";
   const [rows] = await getPool().query<AssetRow[]>(
-    `SELECT id, directory_id, type, name, description, owner_name, department_name, url,
+    `SELECT id, directory_id, type, name, description, owner_workcode, url,
             ${openModeSelect},
             tags, click_count, sort_order, status, created_at, updated_at
      FROM assets
      ORDER BY status ASC, sort_order ASC, id DESC`
   );
+  const [departmentRows] = await getPool().query<AssetDepartmentRow[]>(
+    `SELECT asset_id, department_id FROM asset_departments ORDER BY asset_id, department_id`
+  );
+  const departmentIdsByAsset = new Map<number, string[]>();
+  departmentRows.forEach((row) => {
+    const ids = departmentIdsByAsset.get(Number(row.asset_id)) ?? [];
+    ids.push(row.department_id);
+    departmentIdsByAsset.set(Number(row.asset_id), ids);
+  });
+  const [userMap, departmentMap] = await Promise.all([
+    getEipUsersByWorkcodes(rows.flatMap((row) => row.owner_workcode ? [row.owner_workcode] : [])),
+    getEipDepartmentsByIds(departmentRows.map((row) => row.department_id))
+  ]);
 
-  return rows.map(mapAsset);
+  return rows.map((row) => {
+    const departmentIds = departmentIdsByAsset.get(Number(row.id)) ?? [];
+    return mapAsset(
+      row,
+      row.owner_workcode ? userMap.get(row.owner_workcode)?.name ?? null : null,
+      departmentIds,
+      departmentIds.flatMap((id) => departmentMap.get(id)?.name ?? [])
+    );
+  });
 }
 
 export async function createAdminAsset(input: unknown): Promise<number> {
@@ -452,6 +501,8 @@ export async function createAdminAsset(input: unknown): Promise<number> {
   const name = cleanText(body.name, 160);
   const url = cleanText(body.url, 1000);
   const openMode = cleanAssetOpenMode(body.openMode);
+  const ownerWorkcode = cleanNullableText(body.ownerWorkcode, 100);
+  const departmentIds = cleanDepartmentIds(body.departmentIds);
 
   if (!directoryId) {
     throw new Error("请选择目录");
@@ -465,32 +516,41 @@ export async function createAdminAsset(input: unknown): Promise<number> {
   if (!url) {
     throw new Error("应用链接不能为空");
   }
-
-  const [result] = await getPool().execute<ResultSetHeader>(
-     `INSERT INTO assets (
-         directory_id, type, name, description, owner_name, department_name,
+  await validateEipReferences(ownerWorkcode, departmentIds);
+  const connection = await getPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [result] = await connection.execute<ResultSetHeader>(
+      `INSERT INTO assets (
+         directory_id, type, name, description, owner_workcode,
          url, open_mode, tags, sort_order, status
-      )
-      VALUES (
-         :directoryId, :type, :name, :description, :ownerName, :departmentName,
+       ) VALUES (
+         :directoryId, :type, :name, :description, :ownerWorkcode,
          :url, :openMode, :tags, :sortOrder, :status
-      )`,
-    {
-      directoryId,
-      type,
-      name,
-      description: cleanNullableText(body.description, 800),
-      ownerName: cleanNullableText(body.ownerName, 80),
-      departmentName: cleanNullableText(body.departmentName, 120),
-      url,
-      openMode,
-      tags: JSON.stringify(cleanTags(body.tags)),
-      sortOrder: cleanNumber(body.sortOrder),
-      status: cleanStatus(body.status)
+       )`,
+      {
+        directoryId, type, name, ownerWorkcode,
+        description: cleanNullableText(body.description, 800),
+        url, openMode,
+        tags: JSON.stringify(cleanTags(body.tags)),
+        sortOrder: cleanNumber(body.sortOrder),
+        status: cleanStatus(body.status)
+      }
+    );
+    for (const departmentId of departmentIds) {
+      await connection.execute(
+        `INSERT INTO asset_departments (asset_id, department_id) VALUES (:assetId, :departmentId)`,
+        { assetId: result.insertId, departmentId }
+      );
     }
-  );
-
-  return result.insertId;
+    await connection.commit();
+    return result.insertId;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export async function updateAdminAsset(id: number, input: unknown): Promise<void> {
@@ -503,6 +563,8 @@ export async function updateAdminAsset(id: number, input: unknown): Promise<void
   const name = cleanText(body.name, 160);
   const url = cleanText(body.url, 1000);
   const openMode = cleanAssetOpenMode(body.openMode);
+  const ownerWorkcode = cleanNullableText(body.ownerWorkcode, 100);
+  const departmentIds = cleanDepartmentIds(body.departmentIds);
 
   if (!directoryId) {
     throw new Error("请选择目录");
@@ -516,36 +578,40 @@ export async function updateAdminAsset(id: number, input: unknown): Promise<void
   if (!url) {
     throw new Error("应用链接不能为空");
   }
-
-  await getPool().execute(
-    `UPDATE assets
-     SET directory_id = :directoryId,
-         type = :type,
-         name = :name,
-         description = :description,
-         owner_name = :ownerName,
-         department_name = :departmentName,
-         url = :url,
-         open_mode = :openMode,
-         tags = :tags,
-         sort_order = :sortOrder,
-         status = :status
-     WHERE id = :id`,
-    {
-      id,
-      directoryId,
-      type,
-      name,
-      description: cleanNullableText(body.description, 800),
-      ownerName: cleanNullableText(body.ownerName, 80),
-      departmentName: cleanNullableText(body.departmentName, 120),
-      url,
-      openMode,
-      tags: JSON.stringify(cleanTags(body.tags)),
-      sortOrder: cleanNumber(body.sortOrder),
-      status: cleanStatus(body.status)
+  await validateEipReferences(ownerWorkcode, departmentIds);
+  const connection = await getPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.execute(
+      `UPDATE assets
+       SET directory_id = :directoryId, type = :type, name = :name,
+           description = :description, owner_workcode = :ownerWorkcode,
+           url = :url,
+           open_mode = :openMode, tags = :tags, sort_order = :sortOrder, status = :status
+       WHERE id = :id`,
+      {
+        id, directoryId, type, name, ownerWorkcode,
+        description: cleanNullableText(body.description, 800),
+        url, openMode,
+        tags: JSON.stringify(cleanTags(body.tags)),
+        sortOrder: cleanNumber(body.sortOrder),
+        status: cleanStatus(body.status)
+      }
+    );
+    await connection.execute(`DELETE FROM asset_departments WHERE asset_id = :id`, { id });
+    for (const departmentId of departmentIds) {
+      await connection.execute(
+        `INSERT INTO asset_departments (asset_id, department_id) VALUES (:id, :departmentId)`,
+        { id, departmentId }
+      );
     }
-  );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 const rpaTaskIdColumns = ["id", "task_id", "rpa_task_id"];
@@ -555,11 +621,13 @@ const rpaTaskOwnerColumns = ["owner_name", "owner", "created_by", "creator", "re
 const rpaTaskStatusColumns = ["status", "task_status", "state"];
 const rpaTaskUpdatedAtColumns = ["updated_at", "update_time", "update_date", "modify_time", "last_update_time"];
 const rpaTaskRequirementDocUrlColumns = ["requirement_doc_url"];
+const rpaTaskRelatedMaterialUrlColumns = ["related_material_url"];
 
 async function getAdminRpaTaskColumnConfig() {
   const columns = await getTableColumns("rpa_task");
   const idColumn = pickColumn(columns, rpaTaskIdColumns);
   const requirementDocUrlColumn = pickColumn(columns, rpaTaskRequirementDocUrlColumns);
+  const relatedMaterialUrlColumn = pickColumn(columns, rpaTaskRelatedMaterialUrlColumns);
 
   if (!columns.includes("dept_name")) {
     throw new Error("rpa_task 表缺少 dept_name 字段");
@@ -570,10 +638,14 @@ async function getAdminRpaTaskColumnConfig() {
   if (!requirementDocUrlColumn) {
     throw new Error("rpa_task 表缺少 requirement_doc_url 字段");
   }
+  if (!relatedMaterialUrlColumn) {
+    throw new Error("rpa_task 表缺少 related_material_url 字段");
+  }
 
   return {
     idColumn,
     requirementDocUrlColumn,
+    relatedMaterialUrlColumn,
     taskUuidColumn: pickColumn(columns, rpaTaskUuidColumns),
     nameColumn: pickColumn(columns, rpaTaskNameColumns),
     ownerColumn: pickColumn(columns, rpaTaskOwnerColumns),
@@ -596,6 +668,7 @@ function mapAdminRpaTask(
     ownerName: getValue(row, config.ownerColumn),
     status: getValue(row, config.statusColumn),
     requirementDocUrl: getValue(row, config.requirementDocUrlColumn),
+    relatedMaterialUrl: getValue(row, config.relatedMaterialUrlColumn),
     updatedAt: getValue(row, config.updatedAtColumn)
   };
 }
@@ -616,11 +689,13 @@ export async function updateAdminRpaTask(id: string, input: unknown): Promise<vo
 
   await getPool().execute(
     `UPDATE rpa_task
-     SET ${escapeIdentifier(config.requirementDocUrlColumn)} = :requirementDocUrl
+     SET ${escapeIdentifier(config.requirementDocUrlColumn)} = :requirementDocUrl,
+         ${escapeIdentifier(config.relatedMaterialUrlColumn)} = :relatedMaterialUrl
      WHERE ${escapeIdentifier(config.idColumn)} = :id`,
     {
       id,
-      requirementDocUrl: cleanNullableText(body.requirementDocUrl, 1000)
+      requirementDocUrl: cleanNullableText(body.requirementDocUrl, 1000),
+      relatedMaterialUrl: cleanNullableText(body.relatedMaterialUrl, 1000)
     }
   );
 }

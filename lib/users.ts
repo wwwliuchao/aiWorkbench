@@ -11,6 +11,7 @@ export type SysUser = {
   englishName: string | null;
   firstName: string | null;
   lastName: string | null;
+  departmentId: string | null;
   departmentName: string | null;
   fullJobtitle: string | null;
   isManager: number | null;
@@ -25,6 +26,7 @@ type SysUserRow = RowDataPacket & {
   english_name: string | null;
   first_name: string | null;
   last_name: string | null;
+  department_id: string | null;
   department_name: string | null;
   full_jobtitle: string | null;
   is_manager: number | null;
@@ -40,6 +42,7 @@ function normalizeUser(row: SysUserRow): SysUser {
     englishName: row.english_name,
     firstName: row.first_name,
     lastName: row.last_name,
+    departmentId: row.department_id,
     departmentName: row.department_name,
     fullJobtitle: row.full_jobtitle,
     isManager: row.is_manager
@@ -67,9 +70,10 @@ export async function findActiveUserByEmailAndPassword(email: string, password: 
   const pool = getPool();
   const [rows] = await pool.query<SysUserRow[]>(
     `SELECT user_id, email, mobile, workcode, chinese_name, english_name, first_name, last_name,
-            department_name, full_jobtitle, is_manager
-       FROM sys_user
+            department_id, department_name, full_jobtitle, is_manager
+       FROM eip.sys_user
       WHERE status = 1
+        AND workcode IS NOT NULL AND TRIM(workcode) <> ''
         AND email = :email
         AND UPPER(user_password) = :passwordHash
       LIMIT 1`,
@@ -86,9 +90,11 @@ export async function findActiveUserByEmail(email: string) {
   const pool = getPool();
   const [rows] = await pool.query<SysUserRow[]>(
     `SELECT user_id, email, mobile, workcode, chinese_name, english_name, first_name, last_name,
-            department_name, full_jobtitle, is_manager
-       FROM sys_user
-      WHERE status = 1 AND email = :email
+            department_id, department_name, full_jobtitle, is_manager
+       FROM eip.sys_user
+      WHERE status = 1
+        AND workcode IS NOT NULL AND TRIM(workcode) <> ''
+        AND email = :email
       LIMIT 1`,
     {
       email: email.trim()

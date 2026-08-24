@@ -2,6 +2,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getPool } from "@/lib/db";
 import type { Asset, AssetStats, AssetTypeDefinition, Directory } from "@/types/assets";
 import type { SessionUser } from "@/lib/auth";
+import { getEipDepartmentsByIds, getEipUsersByWorkcodes } from "@/lib/eip";
 
 type DirectoryRow = RowDataPacket & {
   id: number;
@@ -19,8 +20,7 @@ type AssetRow = RowDataPacket & {
   type: Asset["type"];
   name: string;
   description: string | null;
-  owner_name: string | null;
-  department_name: string | null;
+  owner_workcode: string | null;
   url: string;
   open_mode: Asset["openMode"];
   tags: string | string[] | null;
@@ -60,6 +60,11 @@ type DimensionStatRow = RowDataPacket & {
   click_count: number;
 };
 
+type ReferenceDimensionStatRow = RowDataPacket & {
+  id: string | number | null;
+  click_count: number;
+};
+
 type DailyStatRow = RowDataPacket & {
   date: string;
   click_count: number;
@@ -68,6 +73,17 @@ type DailyStatRow = RowDataPacket & {
 type AssetVisitStatRow = RowDataPacket & {
   asset_id: number;
   click_count: number;
+};
+
+type AssetDepartmentRow = RowDataPacket & {
+  asset_id: number;
+  department_id: string;
+};
+
+type RecentAssetRow = RowDataPacket & {
+  asset_id: number;
+  last_visited_at: Date;
+  last_visit_id: number;
 };
 
 function toIso(value: Date) {
@@ -108,10 +124,6 @@ async function directoriesHaveParentId(): Promise<boolean> {
 
 async function assetsHaveClickCount(): Promise<boolean> {
   return tableHasColumn("assets", "click_count");
-}
-
-async function assetsHaveDepartmentName(): Promise<boolean> {
-  return tableHasColumn("assets", "department_name");
 }
 
 async function assetsHaveOpenMode(): Promise<boolean> {
@@ -176,10 +188,8 @@ export async function listAssets(options: {
 }): Promise<Asset[]> {
   const hasParentId = await directoriesHaveParentId();
   const hasClickCount = await assetsHaveClickCount();
-  const hasDepartmentName = await assetsHaveDepartmentName();
   const hasOpenMode = await assetsHaveOpenMode();
   const clickCountSelect = hasClickCount ? "a.click_count" : "0 AS click_count";
-  const departmentNameSelect = hasDepartmentName ? "a.department_name" : "NULL AS department_name";
   const openModeSelect = hasOpenMode ? "a.open_mode" : "'new_tab' AS open_mode";
   const params: Record<string, string | number> = {};
   const filters = ["a.status = 'active'", "d.status = 'active'"];
@@ -198,18 +208,6 @@ export async function listAssets(options: {
     }
   }
 
-  if (options.keyword) {
-    filters.push(`(
-      a.name LIKE :keyword OR
-      a.description LIKE :keyword OR
-      a.owner_name LIKE :keyword OR
-      ${hasDepartmentName ? "a.department_name LIKE :keyword OR" : ""}
-      JSON_SEARCH(a.tags, 'one', :keywordText) IS NOT NULL
-    )`);
-    params.keyword = `%${options.keyword}%`;
-    params.keywordText = `%${options.keyword}%`;
-  }
-
   if (options.type) {
     filters.push("a.type = :type");
     params.type = options.type;
@@ -222,8 +220,7 @@ export async function listAssets(options: {
        a.type,
        a.name,
         a.description,
-        a.owner_name,
-        ${departmentNameSelect},
+        a.owner_workcode,
         a.url,
         ${openModeSelect},
         CAST(a.tags AS CHAR) AS tags,
@@ -238,14 +235,43 @@ export async function listAssets(options: {
     params
   );
 
-  return rows.map((row) => ({
+  const assetIds = rows.map((row) => Number(row.id));
+  const departmentRows = assetIds.length === 0 ? [] : await (async () => {
+    const placeholders = assetIds.map((_, index) => `:assetId${index}`);
+    const assetParams = Object.fromEntries(assetIds.map((id, index) => [`assetId${index}`, id]));
+    const [result] = await getPool().execute<AssetDepartmentRow[]>(
+      `SELECT asset_id, department_id FROM asset_departments
+       WHERE asset_id IN (${placeholders.join(", ")})
+       ORDER BY asset_id, department_id`,
+      assetParams
+    );
+    return result;
+  })();
+  const departmentIdsByAsset = new Map<number, string[]>();
+  departmentRows.forEach((row) => {
+    const ids = departmentIdsByAsset.get(Number(row.asset_id)) ?? [];
+    ids.push(row.department_id);
+    departmentIdsByAsset.set(Number(row.asset_id), ids);
+  });
+  const [userMap, departmentMap] = await Promise.all([
+    getEipUsersByWorkcodes(rows.flatMap((row) => row.owner_workcode ? [row.owner_workcode] : [])),
+    getEipDepartmentsByIds(departmentRows.map((row) => row.department_id))
+  ]);
+  const mappedAssets = rows.map((row) => {
+    const departmentIds = departmentIdsByAsset.get(Number(row.id)) ?? [];
+    const departmentNames = departmentIds
+      .map((id) => departmentMap.get(id)?.name)
+      .filter((name): name is string => Boolean(name));
+    return {
     id: row.id,
     directoryId: row.directory_id,
     type: row.type,
     name: row.name,
     description: row.description,
-      ownerName: row.owner_name,
-      departmentName: row.department_name,
+      ownerWorkcode: row.owner_workcode || null,
+      ownerName: row.owner_workcode ? userMap.get(row.owner_workcode)?.name ?? null : null,
+      departmentIds,
+      departmentName: departmentNames.join(",") || null,
       url: row.url,
       openMode: row.open_mode ?? "new_tab",
       tags: parseTags(row.tags),
@@ -253,7 +279,40 @@ export async function listAssets(options: {
     sortOrder: row.sort_order,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
-  }));
+    };
+  });
+  const keyword = options.keyword?.trim().toLowerCase();
+  if (!keyword) return mappedAssets;
+  return mappedAssets.filter((asset) =>
+    [asset.name, asset.description, asset.ownerName, asset.departmentName, ...asset.tags]
+      .some((value) => value?.toLowerCase().includes(keyword))
+  );
+}
+
+export async function listRecentAssetsForUser(userWorkcode: string, limit = 4): Promise<Asset[]> {
+  if (!(await assetVisitLogsExist())) {
+    return [];
+  }
+
+  const safeLimit = Math.min(20, Math.max(1, Math.trunc(limit)));
+  const [rows] = await getPool().execute<RecentAssetRow[]>(
+    `SELECT
+       asset_id,
+       MAX(visited_at) AS last_visited_at,
+       MAX(id) AS last_visit_id
+     FROM asset_visit_logs
+     WHERE user_workcode = :userWorkcode
+     GROUP BY asset_id
+     ORDER BY last_visited_at DESC, last_visit_id DESC
+     LIMIT ${safeLimit}`,
+    { userWorkcode }
+  );
+
+  const assetMap = new Map((await listAssets({})).map((asset) => [asset.id, asset]));
+  return rows.flatMap((row) => {
+    const asset = assetMap.get(Number(row.asset_id));
+    return asset ? [asset] : [];
+  });
 }
 
 export async function listAssetTypes(): Promise<AssetTypeDefinition[]> {
@@ -329,26 +388,25 @@ export async function getAssetStats(): Promise<AssetStats> {
            FROM asset_visit_logs`
         : `SELECT 0 AS today_click_count, 0 AS seven_day_click_count, 0 AS thirty_day_click_count`
     ),
-    getPool().query<DimensionStatRow[]>(
+    getPool().query<ReferenceDimensionStatRow[]>(
       hasVisitLogs
-        ? `SELECT COALESCE(NULLIF(department_name, ''), '未填写') AS name, ${visitCountSelect} AS click_count
+        ? `SELECT department_id AS id, ${visitCountSelect} AS click_count
            FROM asset_visit_logs
            WHERE visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-           GROUP BY COALESCE(NULLIF(department_name, ''), '未填写')
-           ORDER BY click_count DESC, name ASC
+           GROUP BY department_id
+           ORDER BY click_count DESC, department_id ASC
            LIMIT 10`
-        : `SELECT NULL AS name, 0 AS click_count WHERE 1 = 0`
+        : `SELECT NULL AS id, 0 AS click_count WHERE 1 = 0`
     ),
-    getPool().query<DimensionStatRow[]>(
+    getPool().query<ReferenceDimensionStatRow[]>(
       hasVisitLogs
-        ? `SELECT COALESCE(NULLIF(user_name, ''), NULLIF(user_email, ''), '匿名访问') AS name,
-             ${visitCountSelect} AS click_count
+        ? `SELECT user_workcode AS id, ${visitCountSelect} AS click_count
            FROM asset_visit_logs
            WHERE visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-           GROUP BY COALESCE(NULLIF(user_name, ''), NULLIF(user_email, ''), '匿名访问')
-           ORDER BY click_count DESC, name ASC
+           GROUP BY user_workcode
+           ORDER BY click_count DESC, user_workcode ASC
            LIMIT 10`
-        : `SELECT NULL AS name, 0 AS click_count WHERE 1 = 0`
+        : `SELECT NULL AS id, 0 AS click_count WHERE 1 = 0`
     ),
     getPool().query<DailyStatRow[]>(
       hasVisitLogs
@@ -368,6 +426,10 @@ export async function getAssetStats(): Promise<AssetStats> {
   const [userRows] = userStatsResult;
   const [dailyRows] = dailyStatsResult;
   const periodRow = periodRows[0] ?? {};
+  const [visitDepartmentMap, visitUserMap] = await Promise.all([
+    getEipDepartmentsByIds(departmentRows.flatMap((row) => row.id ? [String(row.id)] : [])),
+    getEipUsersByWorkcodes(userRows.flatMap((row) => row.id ? [String(row.id)] : []))
+  ]);
 
   return {
     directoryCount: Number(directoryCountRows[0]?.count ?? 0),
@@ -389,11 +451,11 @@ export async function getAssetStats(): Promise<AssetStats> {
     })),
     assetVisitStats: [],
     departmentStats: departmentRows.map((row) => ({
-      name: row.name ?? "未填写",
+      name: row.id ? visitDepartmentMap.get(String(row.id))?.name ?? "未知部门" : "未填写",
       clickCount: Number(row.click_count ?? 0)
     })),
     userStats: userRows.map((row) => ({
-      name: row.name ?? "匿名访问",
+      name: row.id ? visitUserMap.get(String(row.id))?.name ?? "未知用户" : "匿名访问",
       clickCount: Number(row.click_count ?? 0)
     })),
     dailyStats: dailyRows.map((row) => ({
@@ -448,6 +510,7 @@ export async function getAssetStatsByDateRange(options: {
   }
 
   const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
+  const rangeCondition = filters.length > 0 ? filters.join(" AND ") : "1 = 1";
   const defaultWindowWhere =
     filters.length > 0 ? where : `WHERE vl.visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`;
   const defaultDailyWhere =
@@ -462,12 +525,11 @@ export async function getAssetStatsByDateRange(options: {
   ] = await Promise.all([
     getPool().execute<RowDataPacket[]>(
       `SELECT
-         COUNT(*) AS range_click_count,
+         SUM(CASE WHEN ${rangeCondition} THEN 1 ELSE 0 END) AS range_click_count,
          SUM(CASE WHEN vl.visited_at >= CURRENT_DATE() THEN 1 ELSE 0 END) AS today_click_count,
          SUM(CASE WHEN vl.visited_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS seven_day_click_count,
          SUM(CASE WHEN vl.visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS thirty_day_click_count
-       FROM ${visitLogFrom}
-       ${where}`,
+       FROM ${visitLogFrom}`,
       params
     ),
     getPool().execute<AssetVisitStatRow[]>(
@@ -478,22 +540,21 @@ export async function getAssetStatsByDateRange(options: {
        ORDER BY click_count DESC, vl.asset_id ASC`,
       params
     ),
-    getPool().execute<DimensionStatRow[]>(
-      `SELECT COALESCE(NULLIF(vl.department_name, ''), '未填写') AS name, COUNT(*) AS click_count
+    getPool().execute<ReferenceDimensionStatRow[]>(
+      `SELECT vl.department_id AS id, COUNT(*) AS click_count
        FROM ${visitLogFrom}
        ${defaultWindowWhere}
-       GROUP BY COALESCE(NULLIF(vl.department_name, ''), '未填写')
-       ORDER BY click_count DESC, name ASC
+       GROUP BY vl.department_id
+       ORDER BY click_count DESC, vl.department_id ASC
        LIMIT 10`,
       params
     ),
-    getPool().execute<DimensionStatRow[]>(
-      `SELECT COALESCE(NULLIF(vl.user_name, ''), NULLIF(vl.user_email, ''), '匿名访问') AS name,
-         COUNT(*) AS click_count
+    getPool().execute<ReferenceDimensionStatRow[]>(
+      `SELECT vl.user_workcode AS id, COUNT(*) AS click_count
        FROM ${visitLogFrom}
        ${defaultWindowWhere}
-       GROUP BY COALESCE(NULLIF(vl.user_name, ''), NULLIF(vl.user_email, ''), '匿名访问')
-       ORDER BY click_count DESC, name ASC
+       GROUP BY vl.user_workcode
+       ORDER BY click_count DESC, vl.user_workcode ASC
        LIMIT 10`,
       params
     ),
@@ -513,6 +574,10 @@ export async function getAssetStatsByDateRange(options: {
   const [userRows] = userStatsResult;
   const [dailyRows] = dailyStatsResult;
   const periodRow = periodRows[0] ?? {};
+  const [visitDepartmentMap, visitUserMap] = await Promise.all([
+    getEipDepartmentsByIds(departmentRows.flatMap((row) => row.id ? [String(row.id)] : [])),
+    getEipUsersByWorkcodes(userRows.flatMap((row) => row.id ? [String(row.id)] : []))
+  ]);
 
   return {
     ...baseStats,
@@ -527,11 +592,11 @@ export async function getAssetStatsByDateRange(options: {
       clickCount: Number(row.click_count ?? 0)
     })),
     departmentStats: departmentRows.map((row) => ({
-      name: row.name ?? "未填写",
+      name: row.id ? visitDepartmentMap.get(String(row.id))?.name ?? "未知部门" : "未填写",
       clickCount: Number(row.click_count ?? 0)
     })),
     userStats: userRows.map((row) => ({
-      name: row.name ?? "匿名访问",
+      name: row.id ? visitUserMap.get(String(row.id))?.name ?? "未知用户" : "匿名访问",
       clickCount: Number(row.click_count ?? 0)
     })),
     dailyStats: dailyRows.map((row) => ({
@@ -570,29 +635,23 @@ export async function recordAssetClick(assetId: number, context?: {
   const [result] = await getPool().execute<ResultSetHeader>(
     `INSERT INTO asset_visit_logs (
        asset_id,
-       user_id,
-       user_name,
-       user_email,
-       department_name,
+       user_workcode,
+       department_id,
        ip_address,
        user_agent
      )
      SELECT
        a.id,
-       :userId,
-       :userName,
-       :userEmail,
-       COALESCE(:userDepartmentName, a.department_name),
+       :userWorkcode,
+       :departmentId,
        :ipAddress,
        :userAgent
      FROM assets a
      WHERE a.id = :assetId AND a.status = 'active'`,
     {
       assetId,
-      userId: context?.user?.id ?? null,
-      userName: context?.user?.name ?? null,
-      userEmail: context?.user?.email ?? null,
-      userDepartmentName: context?.user?.departmentName ?? null,
+      userWorkcode: context?.user?.id ?? null,
+      departmentId: context?.user?.departmentId ?? null,
       ipAddress: context?.ipAddress ?? null,
       userAgent: context?.userAgent ?? null
     }

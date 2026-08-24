@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS assets (
   type VARCHAR(50) NOT NULL,
   name VARCHAR(160) NOT NULL,
   description VARCHAR(800) NULL,
+  owner_user_id INT NULL,
+  owner_workcode VARCHAR(100) NULL,
   owner_name VARCHAR(80) NULL,
   department_name VARCHAR(120) NULL,
   url VARCHAR(1000) NOT NULL,
@@ -57,6 +59,8 @@ CREATE TABLE IF NOT EXISTS assets (
   PRIMARY KEY (id),
   KEY idx_assets_directory_status_sort (directory_id, status, sort_order, id),
   KEY idx_assets_type_status (type, status),
+  KEY idx_assets_owner_user_id (owner_user_id),
+  KEY idx_assets_owner_workcode (owner_workcode),
   KEY idx_assets_click_count (click_count),
   FULLTEXT KEY ft_assets_search (name, description, owner_name, department_name),
   CONSTRAINT fk_assets_directory
@@ -71,10 +75,24 @@ CREATE TABLE IF NOT EXISTS assets (
   CONSTRAINT chk_assets_open_mode CHECK (open_mode IN ('current_tab', 'new_tab'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS asset_departments (
+  asset_id BIGINT UNSIGNED NOT NULL,
+  department_id VARCHAR(128) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (asset_id, department_id),
+  KEY idx_asset_departments_department (department_id, asset_id),
+  CONSTRAINT fk_asset_departments_asset
+    FOREIGN KEY (asset_id) REFERENCES assets (id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS asset_visit_logs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   asset_id BIGINT UNSIGNED NOT NULL,
   user_id INT NULL,
+  user_workcode VARCHAR(100) NULL,
+  department_id VARCHAR(128) NULL,
   user_name VARCHAR(120) NULL,
   user_email VARCHAR(255) NULL,
   department_name VARCHAR(120) NULL,
@@ -86,10 +104,48 @@ CREATE TABLE IF NOT EXISTS asset_visit_logs (
   KEY idx_asset_visit_logs_time (visited_at),
   KEY idx_asset_visit_logs_department_time (department_name, visited_at),
   KEY idx_asset_visit_logs_user_time (user_id, visited_at),
+  KEY idx_asset_visit_logs_user_workcode_time (user_workcode, visited_at),
+  KEY idx_asset_visit_logs_department_id_time (department_id, visited_at),
   CONSTRAINT fk_asset_visit_logs_asset
     FOREIGN KEY (asset_id) REFERENCES assets (id)
     ON DELETE RESTRICT
     ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS quick_service_groups (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(120) NOT NULL,
+  description VARCHAR(500) NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_quick_service_groups_status_sort (status, sort_order, id),
+  CONSTRAINT chk_quick_service_groups_status CHECK (status IN ('active', 'inactive'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS quick_service_cards (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  group_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  description VARCHAR(800) NULL,
+  url VARCHAR(1000) NOT NULL,
+  open_mode VARCHAR(20) NOT NULL DEFAULT 'new_tab',
+  icon VARCHAR(50) NULL,
+  color VARCHAR(30) NOT NULL DEFAULT 'blue',
+  sort_order INT NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_quick_service_cards_group_status_sort (group_id, status, sort_order, id),
+  CONSTRAINT fk_quick_service_cards_group
+    FOREIGN KEY (group_id) REFERENCES quick_service_groups (id)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE,
+  CONSTRAINT chk_quick_service_cards_status CHECK (status IN ('active', 'inactive')),
+  CONSTRAINT chk_quick_service_cards_open_mode CHECK (open_mode IN ('current_tab', 'new_tab'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO asset_types (code, name, description, color, icon, sort_order, status)

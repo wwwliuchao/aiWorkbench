@@ -113,9 +113,10 @@ export async function GET(request: NextRequest) {
   setSessionCookie(
     response,
     {
-      id: user.userId,
+      id: user.workcode!,
       name: getDisplayName(user),
       email: user.email,
+      departmentId: user.departmentId,
       departmentName: user.departmentName,
       provider: "feishu",
       isAdmin: user.isManager === 1

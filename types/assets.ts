@@ -69,7 +69,9 @@ export type Asset = {
   type: AssetType;
   name: string;
   description: string | null;
+  ownerWorkcode: string | null;
   ownerName: string | null;
+  departmentIds: string[];
   departmentName: string | null;
   url: string;
   openMode: AssetOpenMode;
@@ -78,4 +80,43 @@ export type Asset = {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type EipUserReference = {
+  id: string;
+  name: string;
+  email: string | null;
+  departmentId: string | null;
+  departmentName: string | null;
+};
+
+export type EipDepartmentReference = {
+  id: string;
+  name: string;
+  fullName: string;
+  parentId: string | null;
+};
+
+export type QuickServiceCard = {
+  id: number;
+  groupId: number;
+  name: string;
+  description: string | null;
+  url: string;
+  openMode: AssetOpenMode;
+  icon: string | null;
+  color: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type QuickServiceGroup = {
+  id: number;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  cards: QuickServiceCard[];
 };
