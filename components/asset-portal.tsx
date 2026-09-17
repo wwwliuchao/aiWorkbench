@@ -36,7 +36,7 @@ type RpaTask = {
   ownerName: string | null;
   requirementDocUrl: string | null;
   relatedMaterialUrl: string | null;
-  status: string | null;
+  status: "启用" | "禁用" | "不存在";
   createdAt: string | null;
   scheduleDescription: string;
 };
@@ -64,6 +64,7 @@ type RpaRunRecordPage = {
 
 const assetListPageSize = 10;
 const rpaTaskPageSize = 10;
+const rpaTaskStatusOrder: RpaTask["status"][] = ["启用", "禁用", "不存在"];
 
 type AdminStatus = "active" | "inactive";
 
@@ -149,7 +150,7 @@ type AdminRpaTask = {
   deptName: string;
   name: string;
   ownerName: string | null;
-  status: string | null;
+  status: "启用" | "禁用" | "不存在";
   requirementDocUrl: string | null;
   relatedMaterialUrl: string | null;
   updatedAt: string | null;
@@ -209,6 +210,35 @@ function getTypeIcon(icon?: string | null) {
 
 function getAssetLinkProps(openMode: Asset["openMode"]) {
   return openMode === "new_tab" ? { target: "_blank", rel: "noreferrer" as const } : {};
+}
+
+function isHttpUrl(value: string | null | undefined): value is string {
+  return /^https?:\/\/\S+$/i.test(value?.trim() ?? "");
+}
+
+function RpaReferenceValue({ value }: { value: string | null }) {
+  const displayValue = value?.trim();
+
+  if (!displayValue) {
+    return <span className="rpaReferenceEmpty">无</span>;
+  }
+
+  if (isHttpUrl(displayValue)) {
+    return (
+      <a className="assetNameLink inlineLink" href={displayValue} target="_blank" rel="noreferrer">
+        查看链接
+      </a>
+    );
+  }
+
+  return (
+    <span className="rpaReferenceText" tabIndex={0}>
+      <span className="rpaReferenceTextPreview">{displayValue}</span>
+      <span className="rpaReferenceTooltip" role="tooltip">
+        {displayValue}
+      </span>
+    </span>
+  );
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -1511,36 +1541,18 @@ function RpaTaskPanel({
                   </span>
                 </div>
                 <span>{task.deptName}</span>
-                <span>
-                  {task.requirementDocUrl ? (
-                    <a className="assetNameLink inlineLink" href={task.requirementDocUrl} target="_blank" rel="noreferrer">
-                      查看文档
-                    </a>
-                  ) : (
-                    "未填写"
-                  )}
+                <span className="rpaReferenceCell">
+                  <RpaReferenceValue value={task.requirementDocUrl} />
                 </span>
-                <span>
-                  {task.relatedMaterialUrl ? (
-                    <a className="assetNameLink inlineLink" href={task.relatedMaterialUrl} target="_blank" rel="noreferrer">
-                      查看资料
-                    </a>
-                  ) : (
-                    "未填写"
-                  )}
+                <span className="rpaReferenceCell">
+                  <RpaReferenceValue value={task.relatedMaterialUrl} />
                 </span>
                 <span
                   className={`rpaStatusPill ${
-                    /运行|执行|running/i.test(task.status || "")
-                      ? "running"
-                      : /成功|完成|success|completed/i.test(task.status || "")
-                        ? "success"
-                        : /失败|异常|error|fail/i.test(task.status || "")
-                          ? "error"
-                          : "neutral"
+                    task.status === "启用" ? "enabled" : task.status === "禁用" ? "disabled" : "missing"
                   }`}
                 >
-                  {task.status || "未填写"}
+                  {task.status}
                 </span>
                 <span>{task.createdAt ? task.createdAt.slice(0, 19).replace("T", " ") : "未填写"}</span>
                 <div className="rpaActionCell">
@@ -3320,7 +3332,7 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
             <div className="adminSectionHeader">
               <div>
                 <h2>{editingRpaTaskId ? "编辑 RPA 任务" : "选择 RPA 任务"}</h2>
-                <p>仅维护需求文档和相关资料链接，任务名称、部门和 UUID 为只读。</p>
+                <p>维护需求文档和相关资料的链接或文本内容，任务名称、部门和 UUID 为只读。</p>
               </div>
             </div>
             <div className="formGrid">
@@ -3337,20 +3349,20 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
                 <input value={rpaTaskForm.taskUuid} disabled />
               </label>
               <label className="wideField">
-                需求文档链接
-                <input
+                需求文档（链接或文本）
+                <textarea
                   value={rpaTaskForm.requirementDocUrl}
-                  placeholder="https://..."
+                  placeholder="请输入 http(s) 链接或文本内容"
                   onChange={(event) =>
                     setRpaTaskForm({ ...rpaTaskForm, requirementDocUrl: event.target.value })
                   }
                 />
               </label>
               <label className="wideField">
-                相关资料链接
-                <input
+                相关资料（链接或文本）
+                <textarea
                   value={rpaTaskForm.relatedMaterialUrl}
-                  placeholder="https://..."
+                  placeholder="请输入 http(s) 链接或文本内容"
                   onChange={(event) =>
                     setRpaTaskForm({ ...rpaTaskForm, relatedMaterialUrl: event.target.value })
                   }
@@ -3408,7 +3420,7 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
                   <button type="button" onClick={() => editRpaTask(task)}>
                     编辑
                   </button>
-                  {task.requirementDocUrl ? (
+                  {isHttpUrl(task.requirementDocUrl) ? (
                     <a
                       className="secondaryButton adminLinkButton"
                       href={task.requirementDocUrl}
@@ -3418,7 +3430,7 @@ function AdminPanel({ onDataChanged }: { onDataChanged: () => void }) {
                       打开文档
                     </a>
                   ) : null}
-                  {task.relatedMaterialUrl ? (
+                  {isHttpUrl(task.relatedMaterialUrl) ? (
                     <a
                       className="secondaryButton adminLinkButton"
                       href={task.relatedMaterialUrl}
@@ -3680,9 +3692,8 @@ export default function AssetPortal() {
     );
   }, [rpaTasks.data]);
   const rpaStatuses = useMemo(() => {
-    return Array.from(
-      new Set(rpaTasks.data.map((task) => task.status?.trim()).filter((status): status is string => Boolean(status)))
-    ).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
+    const availableStatuses = new Set(rpaTasks.data.map((task) => task.status));
+    return rpaTaskStatusOrder.filter((status) => availableStatuses.has(status));
   }, [rpaTasks.data]);
   const filteredRpaTasks = useMemo(() => {
     const normalizedKeyword = rpaKeyword.trim().toLowerCase();
@@ -3692,7 +3703,7 @@ export default function AssetPortal() {
         return false;
       }
 
-      if (selectedRpaStatus && (task.status ?? "") !== selectedRpaStatus) {
+      if (selectedRpaStatus && task.status !== selectedRpaStatus) {
         return false;
       }
 

@@ -7453,6 +7453,94 @@ input {
   font-size: 12px;
 }
 
+.rpaReferenceCell {
+  min-width: 0;
+}
+
+.rpaReferenceCell .inlineLink {
+  width: fit-content;
+  margin-bottom: 0;
+}
+
+.rpaReferenceEmpty {
+  color: #8a96aa;
+}
+
+.rpaReferenceText {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  cursor: help;
+}
+
+.rpaReferenceTextPreview {
+  display: block;
+  overflow: hidden;
+  color: #42516b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rpaReferenceTooltip {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 0;
+  z-index: 50;
+  width: max-content;
+  max-width: min(420px, 60vw);
+  max-height: 240px;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: #17233d;
+  color: #fff;
+  padding: 10px 12px;
+  box-shadow: 0 10px 26px rgba(20, 36, 69, 0.24);
+  font-size: 12px;
+  line-height: 1.65;
+  opacity: 0;
+  overflow-wrap: anywhere;
+  cursor: text;
+  pointer-events: auto;
+  user-select: text;
+  transform: translateY(4px);
+  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+  visibility: hidden;
+  white-space: pre-wrap;
+}
+
+.rpaReferenceTooltip::before {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  height: 10px;
+  content: "";
+}
+
+.rpaReferenceTooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 18px;
+  width: 8px;
+  height: 8px;
+  background: #17233d;
+  content: "";
+  transform: translateY(-4px) rotate(45deg);
+}
+
+.rpaReferenceText:hover .rpaReferenceTooltip,
+.rpaReferenceText:focus .rpaReferenceTooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.rpaReferenceText:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid rgba(47, 114, 229, 0.35);
+  outline-offset: 2px;
+}
+
 .rpaTaskNameWithTooltip {
   position: relative;
   display: inline-block;
@@ -7558,6 +7646,24 @@ input {
   border-color: #dce3ed;
   background: #f3f5f8;
   color: #68758a;
+}
+
+.rpaStatusPill.enabled {
+  border-color: #bde7d7;
+  background: #eaf8f2;
+  color: #15825f;
+}
+
+.rpaStatusPill.disabled {
+  border-color: #dce3ed;
+  background: #f3f5f8;
+  color: #68758a;
+}
+
+.rpaStatusPill.missing {
+  border-color: #ecd6a8;
+  background: #fff8e8;
+  color: #9a6a12;
 }
 
 .rpaWorkspaceTable .rpaActionButton {

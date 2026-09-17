@@ -71,7 +71,7 @@ export type AdminRpaTask = {
   deptName: string;
   name: string;
   ownerName: string | null;
-  status: string | null;
+  status: "启用" | "禁用" | "不存在";
   requirementDocUrl: string | null;
   relatedMaterialUrl: string | null;
   updatedAt: string | null;
@@ -185,6 +185,17 @@ function valueToString(value: unknown) {
 
 function getValue(row: GenericRpaRow, column: string | null) {
   return column ? valueToString(row[column]) : null;
+}
+
+function getRpaTaskEnableStatus(
+  row: GenericRpaRow,
+  column: string | null
+): AdminRpaTask["status"] {
+  const value = getValue(row, column)?.trim();
+
+  if (value === "1") return "启用";
+  if (value === "0") return "禁用";
+  return "不存在";
 }
 
 function escapeIdentifier(identifier: string) {
@@ -618,7 +629,7 @@ const rpaTaskIdColumns = ["id", "task_id", "rpa_task_id"];
 const rpaTaskUuidColumns = ["task_uuid"];
 const rpaTaskNameColumns = ["task_name", "name", "task_title", "title", "program_name", "job_name"];
 const rpaTaskOwnerColumns = ["owner_name", "owner", "created_by", "creator", "responsible_person", "user_name"];
-const rpaTaskStatusColumns = ["status", "task_status", "state"];
+const rpaTaskEnableColumns = ["enable"];
 const rpaTaskUpdatedAtColumns = ["updated_at", "update_time", "update_date", "modify_time", "last_update_time"];
 const rpaTaskRequirementDocUrlColumns = ["requirement_doc_url"];
 const rpaTaskRelatedMaterialUrlColumns = ["related_material_url"];
@@ -649,7 +660,7 @@ async function getAdminRpaTaskColumnConfig() {
     taskUuidColumn: pickColumn(columns, rpaTaskUuidColumns),
     nameColumn: pickColumn(columns, rpaTaskNameColumns),
     ownerColumn: pickColumn(columns, rpaTaskOwnerColumns),
-    statusColumn: pickColumn(columns, rpaTaskStatusColumns),
+    enableColumn: pickColumn(columns, rpaTaskEnableColumns),
     updatedAtColumn: pickColumn(columns, rpaTaskUpdatedAtColumns)
   };
 }
@@ -666,7 +677,7 @@ function mapAdminRpaTask(
     deptName: getValue(row, "dept_name") || "未分组",
     name: getValue(row, config.nameColumn) ?? `RPA 任务 ${id}`,
     ownerName: getValue(row, config.ownerColumn),
-    status: getValue(row, config.statusColumn),
+    status: getRpaTaskEnableStatus(row, config.enableColumn),
     requirementDocUrl: getValue(row, config.requirementDocUrlColumn),
     relatedMaterialUrl: getValue(row, config.relatedMaterialUrlColumn),
     updatedAt: getValue(row, config.updatedAtColumn)

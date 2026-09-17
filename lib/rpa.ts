@@ -10,7 +10,7 @@ export type RpaTask = {
   ownerName: string | null;
   requirementDocUrl: string | null;
   relatedMaterialUrl: string | null;
-  status: string | null;
+  status: "启用" | "禁用" | "不存在";
   createdAt: string | null;
   scheduleDescription: string;
 };
@@ -49,7 +49,7 @@ const taskDescriptionColumns = ["task_desc", "description", "remark", "remarks",
 const taskOwnerColumns = ["owner_name", "owner", "created_by", "creator", "responsible_person", "user_name"];
 const taskRequirementDocUrlColumns = ["requirement_doc_url"];
 const taskRelatedMaterialUrlColumns = ["related_material_url"];
-const taskStatusColumns = ["status", "task_status", "state"];
+const taskEnableColumns = ["enable"];
 const taskCreatedAtColumns = ["create_time"];
 
 const recordIdColumns = ["id", "record_id", "run_id", "rpa_run_record_id"];
@@ -111,6 +111,14 @@ function valueToString(value: unknown) {
 
 function getValue(row: GenericRow, column: string | null) {
   return column ? valueToString(row[column]) : null;
+}
+
+function getTaskEnableStatus(row: GenericRow, column: string | null): RpaTask["status"] {
+  const value = getValue(row, column)?.trim();
+
+  if (value === "1") return "启用";
+  if (value === "0") return "禁用";
+  return "不存在";
 }
 
 function escapeIdentifier(identifier: string) {
@@ -273,7 +281,7 @@ async function getRpaTaskColumnConfig() {
     ownerColumn: pickColumn(columns, taskOwnerColumns),
     requirementDocUrlColumn: pickColumn(columns, taskRequirementDocUrlColumns),
     relatedMaterialUrlColumn: pickColumn(columns, taskRelatedMaterialUrlColumns),
-    statusColumn: pickColumn(columns, taskStatusColumns),
+    enableColumn: pickColumn(columns, taskEnableColumns),
     createdAtColumn: pickColumn(columns, taskCreatedAtColumns)
   };
 }
@@ -294,7 +302,7 @@ function mapRpaTask(
     ownerName: getValue(row, config.ownerColumn),
     requirementDocUrl: getValue(row, config.requirementDocUrlColumn),
     relatedMaterialUrl: getValue(row, config.relatedMaterialUrlColumn),
-    status: getValue(row, config.statusColumn),
+    status: getTaskEnableStatus(row, config.enableColumn),
     createdAt: getValue(row, config.createdAtColumn),
     scheduleDescription: formatScheduleDescription(getValue(row, config.descriptionColumn))
   };
